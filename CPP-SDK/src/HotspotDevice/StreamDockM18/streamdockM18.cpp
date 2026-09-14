@@ -4,12 +4,24 @@
 static constexpr auto VID_STREAMDOCK_M18 = 0x6603;
 static constexpr auto PID_STREAMDOCK_M18 = 0x1009;
 
+static constexpr auto VID_STREAMDOCK_M18_1 = 0x5548;
+static constexpr auto PID_STREAMDOCK_M18_1 = 0x1000;
+
 static constexpr auto VID_STREAMDOCK_M18E = 0x6603;
 static constexpr auto PID_STREAMDOCK_M18E = 0x1012;
 
 bool StreamDockM18::registered_M18 = []()
 {
 	StreamDockFactory::instance().registerDevice(VID_STREAMDOCK_M18, PID_STREAMDOCK_M18,
+												 [](const hid_device_info &device_info)
+												 {
+													 auto device = std::make_unique<StreamDockM18>(device_info);
+													 device->init();
+													 device->initImgHelper();
+													 return device;
+												 });
+	// VSD / VSDinside-branded Stream Dock M18
+	StreamDockFactory::instance().registerDevice(VID_STREAMDOCK_M18_1, PID_STREAMDOCK_M18_1,
 												 [](const hid_device_info &device_info)
 												 {
 													 auto device = std::make_unique<StreamDockM18>(device_info);

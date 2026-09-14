@@ -4,12 +4,24 @@
 static constexpr auto VID_K1Pro = 0x6603;
 static constexpr auto PID_K1Pro = 0x1015;
 
+static constexpr auto VID_K1Pro_2 = 0x5548;
+static constexpr auto PID_K1Pro_2 = 0x1025;
+
 static constexpr auto VID_K1ProEU = 0x6603;
 static constexpr auto PID_K1ProEU = 0x1019;
 
 bool K1Pro::registered_K1Pro = []()
 {
 	StreamDockFactory::instance().registerDevice(VID_K1Pro, PID_K1Pro,
+												 [](const hid_device_info &device_info)
+												 {
+													 auto device = std::make_unique<K1Pro>(device_info);
+													 device->init();
+													 device->initImgHelper();
+													 return device;
+												 });
+
+	StreamDockFactory::instance().registerDevice(VID_K1Pro_2, PID_K1Pro_2,
 												 [](const hid_device_info &device_info)
 												 {
 													 auto device = std::make_unique<K1Pro>(device_info);
