@@ -14,6 +14,7 @@ class HomeAssistantHandler(BaseHandler):
         self._homeassistant_url = config['homeassistant_url']
         self._homeassistant_token = config['homeassistant_token']
         self._active_scene = None
+        self._client = None
 
         self.connect()
         self.update()
@@ -22,14 +23,17 @@ class HomeAssistantHandler(BaseHandler):
         self.refresh_active_scene()
 
     def connect(self):
+        # homeassistant-api >= 6.x: Client(api_url, token) only. The old
+        # cache_session kwarg was removed; passing it raises a TypeError that
+        # used to leave _client unset (everything fell back to error.png).
         try:
             self._client = homeassistant_api.Client(
                 self._homeassistant_url,
                 self._homeassistant_token,
-                cache_session=False
             )
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"HomeAssistant connect failed: {e}")
+            self._client = None
 
     def client(self):
         return self._client
