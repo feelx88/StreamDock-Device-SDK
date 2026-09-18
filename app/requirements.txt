@@ -1,6 +1,17 @@
 # App dependencies for the StreamDock device app (main.py + handlers).
-# These are in addition to the SDK's own dependencies (see ../requirements.txt).
+# Install with: pip install -r requirements.txt
+#
+# The app imports the upstream SDK from ../Python-SDK/src at runtime.
+# The SDK's own core deps are listed here too so this file is fully
+# self-contained (the SDK's Python-SDK/requirements.txt stays untouched).
 
+# --- SDK core dependencies (duplicated from Python-SDK/requirements.txt) ---
+# Image handling used by the SDK (PIL) and sdk_patch.py
+pillow
+# Hotplug device enumeration on Linux (pyudev)
+pyudev ; sys_platform == "linux"
+
+# --- App dependencies ---
 # Home Assistant integration (homeassistant_handler.py)
 homeassistant-api
 
