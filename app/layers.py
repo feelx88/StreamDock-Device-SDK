@@ -32,17 +32,23 @@ class Layers:
         self.device = device
 
     def set_layer(self, new_layer, new_sub_layer=None):
-        self.device.clearAllIcon()
-
         if new_sub_layer is not None:
-            self.sub_layer = new_sub_layer
+            new_sub = new_sub_layer
         elif self.layer == new_layer:
-            self.sub_layer = (
+            new_sub = (
                 self.sub_layer + 1) % len(self.keys['layers'][self.layer])
         else:
-            self.sub_layer = 0
+            new_sub = 0
 
-        self.layer = new_layer
+        # Only clear + switch when the page really changes. Clearing icons on
+        # an unchanged page (e.g. rotating on a single-page layer) blanks the
+        # device while refresh() still thinks the display is current, so the
+        # keys never get redrawn.
+        if new_layer != self.layer or new_sub != self.sub_layer:
+            if self.device is not None:
+                self.device.clearAllIcon()
+            self.layer = new_layer
+            self.sub_layer = new_sub
 
     def set_layer_relative(self, layer_delta=None, sub_layer_delta=None):
         if layer_delta is not None:
