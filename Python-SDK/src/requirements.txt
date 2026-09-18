@@ -1,0 +1,11 @@
+# App dependencies for the StreamDock device app (main.py + handlers).
+# These are in addition to the SDK's own dependencies (see ../requirements.txt).
+
+# Home Assistant integration (homeassistant_handler.py)
+homeassistant-api
+
+# MPD music player client (mpd_handler.py)
+python-mpd2
+
+# D-Bus bindings (used by playerctl/loginctl integrations via bus sessions)
+dbus-python
