@@ -45,8 +45,8 @@ class HomeAssistantHandler(BaseHandler):
 
     def scene(self, scene):
         entity_id = 'scene.{}'.format(scene)
-        active = '../images/{}.active.png'.format(scene)
-        inactive = '../images/{}.png'.format(scene)
+        active = 'images/{}.active.png'.format(scene)
+        inactive = 'images/{}.png'.format(scene)
 
         def trigger(entity_id):
             with self._acquire_timeout(HA):
@@ -58,7 +58,7 @@ class HomeAssistantHandler(BaseHandler):
 
         def img():
             if self._active_scene is None:
-                return '../images/error.png'
+                return 'images/error.png'
             return active if self._active_scene == entity_id else inactive
 
         return (

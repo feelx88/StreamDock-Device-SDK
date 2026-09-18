@@ -25,6 +25,6 @@ class YDoToolHandler(BaseHandler):
 
         return (
             lambda: cmd(),
-            lambda: '../images/{}.active.png'.format(
-                name) if toggle and self._states.get(name, False) else '../images/{}.png'.format(name)
+            lambda: 'images/{}.active.png'.format(
+                name) if toggle and self._states.get(name, False) else 'images/{}.png'.format(name)
         )

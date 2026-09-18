@@ -30,5 +30,5 @@ class LoginCtlHandler(BaseHandler):
 
         return (
             lambda: cmd(),
-            lambda: '../images/locked.png' if locked() else '../images/unlocked.png'
+            lambda: 'images/locked.png' if locked() else 'images/unlocked.png'
         )

@@ -80,11 +80,11 @@ class MPDHandler(BaseHandler):
             with self._acquire_timeout(MPD):
                 try:
                     if self._client.status()['state'] == 'pause':
-                        return '../images/media_play.png'
+                        return 'images/media_play.png'
                     else:
-                        return '../images/media_pause.png'
+                        return 'images/media_pause.png'
                 except Exception:
-                    return '../images/error.png'
+                    return 'images/error.png'
 
         return (
             lambda: cmd(),
@@ -94,11 +94,11 @@ class MPDHandler(BaseHandler):
     def previous(self):
         return (
             lambda: self.guard(self._client.previous),
-            '../images/media_previous.png',
+            'images/media_previous.png',
         )
 
     def next(self):
         return (
             lambda: self.guard(self._client.next),
-            '../images/media_next.png',
+            'images/media_next.png',
         )

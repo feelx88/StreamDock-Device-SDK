@@ -60,10 +60,10 @@ class Keys:
                         2: self.hass.scene('nachtmodus'),
                         3: (
                             lambda: self.layers.set_layer(3),
-                            '../images/games.png'
+                            'images/games.png'
                         ),
                         4: self.hass.trigger_service(
-                            '../images/lightbulb_circle_green.png',
+                            'images/lightbulb_circle_green.png',
                             'light',
                             'turn_on',
                             entity_id='light.neopixel_light',
@@ -71,7 +71,7 @@ class Keys:
                             brightness=125,
                         ),
                         5: self.hass.trigger_service(
-                            '../images/table_lamp.png',
+                            'images/table_lamp.png',
                             'switch',
                             'toggle',
                             entity_id='switch.outlet003',
@@ -84,7 +84,7 @@ class Keys:
                         1: self.hass.scene('vogelmodus'),
                         2: self.hass.scene('nachtmodus'),
                         4: self.hass.trigger_service(
-                            '../images/table_lamp.png',
+                            'images/table_lamp.png',
                             'switch',
                             'toggle',
                             entity_id='switch.outlet003',

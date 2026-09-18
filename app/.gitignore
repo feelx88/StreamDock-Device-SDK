@@ -1,0 +1,5 @@
+config.json
+volume.state
+mpd_volume.state
+__pycache__/
+*.py[cod]

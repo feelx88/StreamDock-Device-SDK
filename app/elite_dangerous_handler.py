@@ -40,8 +40,8 @@ class EliteDangerousHandler(YDoToolHandler):
 
         return (
             lambda: cmd(),
-            lambda: '../images/{}.active.png'.format(name) if self._is_flag_set(
-                flag) else '../images/{}.png'.format(name)
+            lambda: 'images/{}.active.png'.format(name) if self._is_flag_set(
+                flag) else 'images/{}.png'.format(name)
         )
 
     def cockpit_mode(self):

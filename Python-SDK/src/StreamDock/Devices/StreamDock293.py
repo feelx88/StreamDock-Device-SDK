@@ -4,7 +4,7 @@ from ..InputTypes import InputEvent, ButtonKey, EventType
 from PIL import Image
 import ctypes
 import ctypes.util
-import os, io, tempfile
+import os, io
 from ..ImageHelpers.PILHelper import *
 import random
 
@@ -121,13 +121,9 @@ class StreamDock293(StreamDock):
 
             image = Image.open(path)
             rotated_image = to_native_key_format(self, image)
-            with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as tmp:
-                temp_image_path = tmp.name
-            try:
-                rotated_image.save(temp_image_path, "JPEG", subsampling=0, quality=95)
-                returnvalue = self.transport.setKeyImg(bytes(temp_image_path, 'utf-8'), hardware_key)
-            finally:
-                os.remove(temp_image_path)
+            rotated_image.save("Temporary.jpg", "JPEG", subsampling=0, quality=95)
+            returnvalue = self.transport.setKeyImg(bytes("Temporary.jpg",'utf-8'), hardware_key)
+            os.remove("Temporary.jpg")
             return returnvalue
 
         except Exception as e:

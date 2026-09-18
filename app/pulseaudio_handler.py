@@ -29,7 +29,7 @@ class PulseAudioHandler(BaseHandler):
 
         return (
             lambda: speakers() if is_headset() else headset(),
-            lambda: '../images/headset.png' if is_headset() else '../images/speaker.png'
+            lambda: 'images/headset.png' if is_headset() else 'images/speaker.png'
         )
 
     def toggle_default_sink_mute(self):
@@ -47,8 +47,8 @@ class PulseAudioHandler(BaseHandler):
 
         return (
             lambda: mute(),
-            lambda: '../images/mic_off.png' if is_current_source_mute()[
-                0] else '../images/mic.png'
+            lambda: 'images/mic_off.png' if is_current_source_mute()[
+                0] else 'images/mic.png'
         )
 
     def toggle_default_source_mute(self):
