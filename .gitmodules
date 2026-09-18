@@ -1,0 +1,6 @@
+[submodule "Python-SDK/src/modules/elite-dangerous/elite-api-docs"]
+	path = Python-SDK/src/modules/elite-dangerous/elite-api-docs
+	url = https://github.com/Lombra/elite-api-docs.git
+[submodule "Python-SDK/src/modules/elite-dangerous/elite-dangerous-stream-deck-icons"]
+	path = Python-SDK/src/modules/elite-dangerous/elite-dangerous-stream-deck-icons
+	url = https://github.com/Rob-Manders/elite-dangerous-stream-deck-icons.git
