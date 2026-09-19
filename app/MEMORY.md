@@ -218,3 +218,21 @@ Also confirmed during this investigation (ruled out, don't re-investigate):
   so its `finally: os.remove(temp_image_path)` is safe — no async race.
 - The single-page rotation blank fix (`ac3f39f`) is intact — `set_layer()` only
   clears+switches on a real page change.
+
+## 2026-09-19 — Single-page rotation blank fix (older, keep intact)
+
+The single-page rotation blank fix (`ac3f39f`) is intact — `set_layer()` only
+clears+switches on a real page change.
+
+## 2026-09-19 — Display wake on unlock (`loginctl_handler.py`)
+
+The unlock branch now also wakes a sleeping/blanked display. There is **no one
+maintainable pip library** that wakes displays across X11+Wayland+macOS+Windows
+(nothing like a universal `wake()`) — the ecosystem is fragmented (X11 DPMS
+`xset`, wlroots `wlopm`, macOS `caffeinate -u`, Windows ES_DISPLAY_REQUIRED).
+So `_wake_display()` (module-level, `loginctl_handler.py`) does a best-effort
+platform dispatch wrapped in try/except, and relies on the one truly universal
+primitive: a **tiny synthetic pointer nudge** (any input activity re-enables a
+blanked panel on every OS). All calls are non-fatal no-ops if the display is
+already awake; wired only into the unlock path (`locked()` true → unlock →
+wake). Do NOT make this fatal or require a new dependency.
