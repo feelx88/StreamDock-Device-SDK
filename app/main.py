@@ -83,11 +83,20 @@ def refresh(device):
 
             if _last_images.get(key) == image:
                 continue
+
             if image is None:
-                device.clearIcon(key)
+                result = device.clearIcon(key)
             else:
-                device.set_key_image(key, image)
-            _last_images[key] = image
+                result = device.set_key_image(key, image)
+
+            # Only treat the key as drawn when the call actually succeeded.
+            # clearAllIcon()/page changes already blank the panel; if a draw
+            # fails (set_key_image returns -1 on a transient USB/transport
+            # error) and we cached it anyway, refresh() would skip this key
+            # forever and the page stays blank until an app restart. Caching on
+            # success only makes a transient failure self-heal on the next tick.
+            if result is None or result >= 0:
+                _last_images[key] = image
 
         device.refresh()
 

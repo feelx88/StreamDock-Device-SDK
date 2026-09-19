@@ -177,3 +177,44 @@ tox.ini, GEMINI.md
    verified via live HA state query + mock-device layer simulation; user
    confirmed HA clicks now work.
 4. Optional once hardware-verified: `git push -u origin feelx88`.
+
+## Top-level LLM instruction set (IMPORTANT)
+
+There is an **LLM instruction set at the repo top level** with some useful
+information: `LLM-linux-instructions.md` (repo root, next to `app/`). It
+contains an instruction set written for LLM agents working on this repo.
+Re-read it whenever beginning a fresh session or when told there is useful
+context at the top level.
+
+## 2026-09-19 — Icons vanish after ~3rd page change, only restart recovers
+
+Symptom: after app restart, all 6 key icons are fine for ~2 page changes, then
+after the third or so page change the whole panel is **completely blank** and
+stays blank until the app is restarted.
+
+Root cause (main.py `refresh()`, cache-written-unconditionally):
+
+- Each real page change calls `layers.set_layer()` → `device.clearAllIcon()`
+  which blanks the whole panel (hardware clear of all 6 keys).
+- `refresh()` then redraws via the `_last_images`/`_last_sublayer` dedup
+  cache. The line `_last_images[key] = image` ran UNCONDITIONALLY, even when
+  `device.set_key_image()` / `clearIcon()` returned an error (`-1`, transient
+  USB/transport failure).
+- So if one draw fails at a page change, that key's image was cached as
+  "current", and on every later tick `if _last_images.get(key) == image:
+  continue` skipped it forever. Panel is already blank from `clearAllIcon()`
+  and the key is never retried → whole page stays blank until restart (which
+  resets the module-global `_last_images`).
+
+Fix: in `app/main.py refresh()` only cache `_last_images[key] = image` when
+the draw **succeeded** (`result >= 0` / `result is None`); on failure leave the
+key uncached so it self-heals on the next 0.3 s refresh tick. Transient losses
+no longer become permanent-until-restart.
+
+Also confirmed during this investigation (ruled out, don't re-investigate):
+- The `sdk_patch.py` tempfile lifecycle is NOT the bug. The transport's
+  `setKeyImg()` reads the file **synchronously** inside the call
+  (LibUSBHIDAPI.py ~1368: `open(path,"rb").read()` -> `set_key_image_stream`),
+  so its `finally: os.remove(temp_image_path)` is safe — no async race.
+- The single-page rotation blank fix (`ac3f39f`) is intact — `set_layer()` only
+  clears+switches on a real page change.
