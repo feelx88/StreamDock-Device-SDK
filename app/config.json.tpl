@@ -3,5 +3,11 @@
   "homeassistant_token": "abcdefg",
   "mpd_ip": "192.168.0.1",
   "mpd_port": 6600,
-  "elite_dangerous_status_path": "/home/user/Saved Games/Frontier Developments/Elite Dangerous/Status.json"
+  "elite_dangerous_status_path": "/home/user/Saved Games/Frontier Developments/Elite Dangerous/Status.json",
+  "audio": {
+    "headset_source": "alsa_input...",
+    "speakers_source": "alsa_input...",
+    "headset_sink": "alsa_output...",
+    "speakers_sink": "alsa_output..."
+  }
 }

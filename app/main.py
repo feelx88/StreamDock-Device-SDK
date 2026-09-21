@@ -45,7 +45,7 @@ _last_images = {}
 _last_sublayer = None
 
 ydotool = YDoToolHandler(cmd_lock)
-pulse = PulseAudioHandler(cmd_lock)
+pulse = PulseAudioHandler(config)
 hass = HomeAssistantHandler(config, hass_lock)
 mpd = MPDHandler(config, mpd_lock)
 playerctl = PlayerCtlHandler(cmd_lock)

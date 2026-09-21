@@ -3,6 +3,15 @@
 This file is the persistent memory for AI agents working on this repo. Last
 updated: 2026-09-18 (after HA handler + single-page rotation fixes).
 
+## Writing & comment style (IMPORTANT)
+
+- Do NOT frame docs or code comments as "the previous version did X, now it does
+  Y". History-diffing narration is not helpful. Describe what the code does and
+  why, in the present tense, as if it always worked this way.
+- Avoid references to removed files/scripts, old bugs, or "used to" phrasing
+  unless the user explicitly asks for a migration/diff explanation.
+- Keep comments about the current design and its rationale, not its lineage.
+
 ## Project Overview
 
 `streamdock` is the home of the **StreamDock** device app (6 display keys +
@@ -51,7 +60,7 @@ layers.py                   page/sub-page rotation logic
 lockable.py                 locking helpers
 base_handler.py             handler base (guard, _acquire_timeout)
 ydotool_handler.py          keyboard emulation via ydotool
-pulseaudio_handler.py       pulse volume/mute via pactl
+pulseaudio_handler.py       pulse volume/mute/device switch via pulsectl
 homeassistant_handler.py    Home Assistant scenes/entities
 mpd_handler.py              MPD client (python-mpd2)
 playerctl_handler.py        media control via playerctl
@@ -121,8 +130,10 @@ tox.ini, GEMINI.md
   **data)` binds keys; error state → `images/error.png`.
 - `MPDHandler`: `client()` helper (method) returns `self._client`; keys call
   `self.mpd.guard(self.mpd.client().volume, -5)` etc.
-- Runtime system deps (not pip): `ydotool`, `pactl` (pulseaudio-utils),
-  `playerctl`, `loginctl` (systemd), `~/.change_audio.sh` helper script.
+- Runtime system deps (not pip): `ydotool`, `playerctl`, `loginctl`
+  (systemd), and `libpulse.so` (for `pulsectl`). Headset/speakers device names
+  are configured in `config.json` under `"audio"` (`.tpl` has placeholders) and
+  applied by `PulseAudioHandler._switch_profile`.
 - Elite Dangerous submodules: `app/modules/elite-dangerous/`
   (`elite-api-docs` @ `753ef2f1…`, `elite-dangerous-stream-deck-icons` @
   `0d0af15a…`); x4-foundations modules under `app/modules/x4-foundations/`.

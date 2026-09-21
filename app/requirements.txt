@@ -18,5 +18,8 @@ homeassistant-api
 # MPD music player client (mpd_handler.py)
 python-mpd2
 
+# PulseAudio control via libpulse (pulseaudio_handler.py)
+pulsectl
+
 # D-Bus bindings (used by playerctl/loginctl integrations via bus sessions)
 dbus-python

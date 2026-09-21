@@ -9,6 +9,7 @@ class Configuration:
         self.mpd_ip = None
         self.mpd_port = None
         self.elite_dangerous_status_path = None
+        self.audio = {}
         self.load()
 
     def load(self):
@@ -19,6 +20,7 @@ class Configuration:
             self.mpd_ip = config.get('mpd_ip')
             self.mpd_port = config.get('mpd_port')
             self.elite_dangerous_status_path = config.get('elite_dangerous_status_path')
+            self.audio = config.get('audio', {})
 
     def __getitem__(self, key):
         return getattr(self, key)
