@@ -111,6 +111,16 @@ class Keys:
                         6: self.elite.lights(),
                         144: lambda: self.layers.set_layer_relative(sub_layer_delta=-1),
                         145: lambda: self.layers.set_layer_relative(sub_layer_delta=1),
+                    },
+                    {
+                        1: self.elite.fire_group(0),
+                        2: self.elite.fire_group(1),
+                        3: self.elite.fire_group(2),
+                        4: self.elite.fire_group(3),
+                        5: self.elite.fire_group(4),
+                        6: self.elite.fire_group(5),
+                        144: lambda: self.layers.set_layer_relative(sub_layer_delta=-1),
+                        145: lambda: self.layers.set_layer_relative(sub_layer_delta=1),
                     }
                 ],
             }

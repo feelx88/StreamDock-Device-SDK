@@ -107,7 +107,7 @@ tox.ini, GEMINI.md
 ### Layers / rotation logic (`app/layers.py`)
 
 - `self.layer` = top-level page index, `self.sub_layer` = page within layer.
-- Layers config: layer 0 → 2 pages, layers 1+2 → 1 page each, layer 3 → 3 pages.
+- Layers config: layer 0 → 2 pages, layers 1+2 → 1 page each, layer 3 → 4 pages.
 - `set_layer(new_layer, new_sub_layer=None)`: computes target page; only calls
   `device.clearAllIcon()` and commits state **when the page actually changes**
   (single-page layers used to blank the screen — fixed in `ac3f39f`).
@@ -166,6 +166,75 @@ tox.ini, GEMINI.md
 - Unverified on hardware: exact press/release byte semantics
   (`state == 0` vs `state == 1` for the release filter) — flagged in
   `app/main.py` comments; confirm on device.
+
+## 2026-09-22 — Elite Dangerous fire group page
+
+- Layer 3 gained a 4th page (index 3): six fire group buttons (A–F).
+- Elite Dangerous has no "select group X" binding, so `fire_group(index)` in
+  `elite_dangerous_handler.py` cycles from the current group to the target with
+  the stock N (49 = next) / B (48 = previous) bindings, choosing the shorter
+  direction (`fwd = (target-current) % 6` vs `back`) and building a multi-press
+  `ydotool` sequence with an extra `wait` token between presses so the game
+  registers every cycle. Pressing the already-active group sends nothing.
+- Fire group selection is **optimistic**: a press immediately claims the target
+  group (highlight); `update()` only syncs the highlight back from Status.json
+  when the file's `timestamp` is *newer* than the last press (a "fresh"
+  reading), or before the first press ever. A stale status value is never
+  applied — the highlight keeps the last pressed group instead of snapping
+  back to an outdated file value.
+- Fire group presses are **queued and sent by a daemon worker**
+  (`_fire_group_worker_loop`): `cmd()` only claims the target optimistically
+  and stores it in a lock-protected, coalescing slot (`_fire_group_queued`
+  under `_fire_group_lock`), so the SDK's reader thread never blocks and a
+  press made while a previous switch is still in flight is always captured
+  (never lost to a read/clear race). The worker drains the slot, computes the
+  delta against `_fire_group_position` (the position the last *sent* sequence
+  ends at, not the optimistic claim), sends the `ydotool` sequence, then waits
+  `FIRE_GROUP_SEQUENCE_GAP` (0.4 s) before accepting the next queued request
+  so ED registers each burst before the next starts. This "in-flight press +
+  settle gap" design is what makes fast consecutive group changes reliable;
+  a first async attempt (no gap) and a synchronous-revert (blocking the reader
+  thread, losing presses made mid-move) both showed intermittent dropped
+  switches and were replaced by this version.
+- **Status.json is an unreliable fire-group signal here:** ED only rewrites
+  the file on some status events (docking, gear, panel focus...) and fire-group
+  changes alone may go unreported for long stretches (observed frozen ~1.5 h
+  through a test window, yet it can update after other events and sometimes
+  carries a newer group). The in-JSON `timestamp` is honored for freshness
+  (trusted only when `ts >= floor(last_press)`), so the app degrades
+  gracefully:
+  - `update()` re-anchors `_fire_group_position` when a reading is fresh and
+    nothing is in flight — the general drop-correction path for setups where
+    the file *does* update.
+  - When the file is stale (the common case here), the optimistic claim and
+    the open-loop position are kept: a stale value can never override the
+    highlight or corrupt the delta base. An earlier design polled Status.json
+    mid-chain to confirm the real landing (`FIRE_GROUP_CONFIRM_TIMEOUT`); it
+    was removed because on this setup the file never confirms, so the polls
+    were pure latency (up to 0.8 s per queued press) with no benefit. The
+    settle gap (`FIRE_GROUP_SEQUENCE_GAP`, 0.4 s) remains the only pause
+    between chained moves.
+- **Single app instance is mandatory.** `streamdock.desktop` (autostart)
+  already launches `main.py`; launching a second copy makes both instances
+  answer the same buttons and each send its own key bursts — symptoms ranged
+  from "completely fucked" to random switching. Never run a second `main.py`.
+- **Sync-back is quick (~1 s).** The optimistic claim is kept while moves are
+  in flight (the worker extends `FIRE_GROUP_OPTIMISTIC_HOLD`, 1 s), and once
+  the last move finishes a fresh Status.json reading replaces the highlight —
+  gated on idle and fresh, so a stale file never overrides the pressed group
+  and a short hold never cuts a move mid-send.
+- ED does accept the fire-group cycle keys with the right-hand panel open
+  (user's normal test setup, confirmed working) — the "works only every 4 s"
+  thread was never a panel problem; it combined a stale re-anchor delay in the
+  app with the dead file signal above, and is resolved by the queue + fresh
+  sync + (critically) a single app instance.
+- `update()` now parses `Flags`, `FireGroup` and `timestamp` from
+  `Status.json` (`None` when the file is missing; `FireGroup` may be a plain
+  int or a dict with `InShip`; `timestamp` is ED's ISO-8601 UTC time, parsed
+  by `_parse_ts` and used to decide freshness). No highlight when unknown.
+- Icons: `images/firegroup_{a..f}.png` ← `Group-*_OFF.png`,
+  `.active.png` ← `Group-*_ON.png` from the stream-deck-icons submodule
+  (1:1 byte copies, same as the other Elite buttons).
 
 ## Configuration & Secrets
 

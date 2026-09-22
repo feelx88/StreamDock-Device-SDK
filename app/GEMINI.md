@@ -62,6 +62,22 @@ The application organizes key mappings into **Layers**. Each layer can contain m
     - Key 2: Cargo Scoop
     - Key 3: Hardpoints
     - Key 4: Landing Gear
+- **Sub-layer 4:** Elite Dangerous fire group shortcuts:
+    - Keys 1-6: Fire groups A-F. Pressing a key cycles to that group using the
+      stock N (next) / B (previous) bindings; the pressed group is highlighted
+      optimistically. On this setup ED only rewrites `Status.json`'s
+      `FireGroup` on some status events (not reliably on fire-group changes),
+      so the highlight is driven by the last press and syncs back to a fresh
+      reading ~1 s after the last move; a stale file value never overrides the
+      pressed group.
+    - Pressing a key during an in-flight switch queues it (instant optimistic
+      highlight; keys sent by a worker thread after a short settle pause so ED
+      registers each move). Rapid chained presses land on the last pressed
+      group.
+    - The deck cycles fire groups with the right-hand panel open (the normal
+      test setup, works). Do **not** run a second `main.py` — autostart
+      (`streamdock.desktop`) already starts one, and a duplicate instance
+      answers every button twice, producing chaotic switching.
 
 # Building and Running
 
