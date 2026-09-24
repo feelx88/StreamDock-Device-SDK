@@ -1,4 +1,6 @@
 #include "TransportCWrapper.h"
+#include <algorithm>
+#include <iterator>
 #include <stdexcept>
 #include <iostream>
 
@@ -159,6 +161,24 @@ void TransportCWrapper::setBackgroundImgStream(const std::string &jpegData, int3
 	if (!_handle)
 		return;
 	transport_set_background_image_stream(_handle, jpegData.data(), jpegData.size(), timeoutMs);
+}
+
+TransportResult TransportCWrapper::uploadH1ProVideo(const std::string &mp4Data, uint32_t timeoutMs) const
+{
+	if (!_handle)
+		return TRANSPORT_ERROR_DEVICE_INVALID_HANDLE;
+	if (mp4Data.empty() || mp4Data.size() > 5U * 1024U * 1024U)
+		return TRANSPORT_ERROR_PARAM_LENGTH;
+	return transport_upload_h1pro_video(_handle, mp4Data.data(), mp4Data.size(), timeoutMs);
+}
+
+std::string TransportCWrapper::lastErrorMessage() const
+{
+	if (!_handle) return {};
+	TransportErrorInfo info{};
+	if (transport_get_last_error_info(_handle, &info) != TRANSPORT_SUCCESS) return {};
+	const auto end = std::find(std::begin(info.error_message), std::end(info.error_message), '\0');
+	return std::string(std::begin(info.error_message), end);
 }
 
 void TransportCWrapper::setBackgroundFrameStream(const std::string &jpegData, uint16_t width, uint16_t height, uint16_t x, uint16_t y, uint8_t FBlayer) const

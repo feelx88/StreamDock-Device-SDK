@@ -1,5 +1,6 @@
 #include "devicemanager.h"
 #ifdef _WIN32
+#include <cstring>
 
 struct WindowContext
 {
@@ -35,7 +36,7 @@ LRESULT DeviceManager::WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lP
 					DeviceEnumerator::DeviceInfo device(*cur);
 					if (StreamDockFactory::instance().exist(device._vendor_id, device._product_id) && StreamDock::isStreamDockHidDeviceUsage(device.toPureHidDeviceInfo()) /* &&
 						 StreamDock::isStreamDockHidDevice(device.toPureHidDeviceInfo())*/
-						&& (cur->path == devicePath))
+						&& cur->path && _stricmp(cur->path, devicePath.c_str()) == 0)
 						canConnect = true;
 					cur = cur->next;
 				}
@@ -52,8 +53,17 @@ LRESULT DeviceManager::WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lP
 				std::shared_ptr<StreamDock> dock;
 				{
 					std::lock_guard lock(manager->streamdocksMutex_);
-					dock = (manager->getStreamDocks().find(devicePath))->second;
+					for (const auto& entry : manager->getStreamDocks())
+					{
+						if (_stricmp(entry.first.c_str(), devicePath.c_str()) == 0)
+						{
+							dock = entry.second;
+							break;
+						}
+					}
 				}
+				if (!dock)
+					break;
 				ToolKit::print("[+] HID Device Added: ", devicePath);
 				try
 				{

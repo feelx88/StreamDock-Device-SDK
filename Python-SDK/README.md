@@ -10,6 +10,33 @@
 
 ## Installation Guide
 
+### H1 Pro / H1 ProE
+
+Both models have 12 keys in 3 rows and 4 columns, with no knobs. Background images are 320 × 240 and key images are 64 × 64.
+H1 Pro uses `5548:1030`; H1 ProE uses `5548:1033`. Both enumerate as `StreamDockH1Pro`.
+
+```python
+from StreamDock.Devices.StreamDockH1Pro import StreamDockH1Pro
+
+# device is an opened and initialized H1 Pro / H1 ProE instance
+device.switch_mode(StreamDockH1Pro.DeviceMode.SCREENSAVER)  # 1
+device.set_touchscreen_image("background.jpg")
+device.switch_mode(StreamDockH1Pro.DeviceMode.KEY)          # 2
+device.set_key_image(1, "key.png")                         # Keys 1–12
+device.upload_gif("animation.gif")                         # Upload only; keep the current mode
+device.switch_mode(StreamDockH1Pro.DeviceMode.GIF)          # 3: play the uploaded animation
+```
+
+`switch_mode()` accepts enum values 0, 1, and 2, corresponding to device modes 1, 2, and 3. `upload_gif()` requires `ffmpeg` on `PATH`; the SDK adjusts size, frame rate, and quality to meet the device's 320 × 240 and 5 MiB limits. H1 Pro has no background GIF stream: upload the file first, then explicitly switch to GIF mode for device-side playback. The updated TransportDLL source must be built before using this API. Key numbers map directly to hardware IDs, arranged as follows (hexadecimal):
+
+```text
+01 02 03 04
+05 06 07 08
+09 0A 0B 0C
+```
+
+The Mini's 90° image rotation remains provisional until verified on hardware.
+
 ### 🔧 Linux Platform
 
 > [Recommended Environment] Ubuntu 20.04 + Python 3.10 or later

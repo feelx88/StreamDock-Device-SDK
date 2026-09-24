@@ -1,5 +1,11 @@
 # StreamDock C++ SDK Documentation
 
+## H1 Pro / H1 ProE
+
+The H1 Pro (`5548:1030`) and H1 ProE (`5548:1033`) share `StreamDockH1Pro`. Both have 12 keys in a 3 by 4 grid, with 64 × 64 key images and a 320 × 240 background image. Key IDs run from 1 to 12, left to right and top to bottom.
+
+Use `setKeyImgFile()`, `setBackgroundImgFile()`, and `setKeyBrightness()` for images and brightness. `switchMode()` accepts `Screensaver`, `Keys`, or `Gif`. Animations play from device storage; background GIF frame streaming is unsupported. `uploadGifFile("animation.gif")` uses ffmpeg from `PATH` to convert and upload the animation, retrying at lower quality when it exceeds 5 MiB or the device reports insufficient storage. `uploadMp4File()` and `uploadMp4Stream()` also accept prepared MJPEG MP4 data. These upload methods return a `TransportResult`. Uploading may restart the USB device; after reconnection, switch to `Gif` mode to play it. `TEST_H1Pro` in `src/test.h` runs a complete demo: it uploads `img/test.gif` once per device per program run, handles reconnection, cycles modes, draws static and animated key images, and registers key callbacks.
+
 ## 1. 📘 Project Overview
 
 This project is a C++17-based SDK that allows users to directly control Stream Dock devices through code.

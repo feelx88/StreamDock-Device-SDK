@@ -7,8 +7,16 @@ from StreamDock.Devices.StreamDockN4Pro import StreamDockN4Pro
 from StreamDock.InputTypes import EventType
 from StreamDock.Devices.StreamDockXL import StreamDockXL
 from StreamDock.Devices.StreamDockMini import StreamDockMini
+from StreamDock.Devices.StreamDockH1Pro import StreamDockH1Pro
 import threading
 import time
+
+# The H1 Pro firmware restarts (USB re-enumeration) after saving an uploaded
+# GIF, so the hotplug listener re-runs setup on the re-added device. Track
+# which devices already received the GIF so the re-setup skips the upload
+# (uploading again would restart the device once more).
+uploaded_gif_devices = set()
+h1pro_reconnected = {}
 
 
 def key_callback(device, event):
@@ -155,6 +163,63 @@ def setup_device(device):
     elif isinstance(device, StreamDockMini):
         # mini only set all colors
         device.set_led_color(0, 0, 255)
+    # H1Pro special function
+    elif isinstance(device, StreamDockH1Pro):
+        # # GIF Upload
+        # device_key = device.get_serial_number() or device.getPath()
+        # if device_key in uploaded_gif_devices:
+        #     # This is the new HID handle after the upload restarted the device.
+        #     # Let the original setup call stop using its disconnected handle.
+        #     reconnect_event = h1pro_reconnected.get(device_key)
+        #     if reconnect_event is not None:
+        #         reconnect_event.set()
+        #     print("H1Pro special function: GIF already uploaded, skipping upload")
+        # else:
+        #     print("H1Pro special function: uploading a GIF")
+        #     # Upload only: the SDK rotates this 640x360 GIF 90°
+        #     # counterclockwise onto a 240x320 canvas (portrait panel) and
+        #     # retries lower-quality encodings if the device reports less free
+        #     # storage than the encoded file needs (within the 5 MiB file
+        #     # limit). Saving the video restarts the firmware, which
+        #     # re-enumerates the USB device and triggers the hotplug re-setup;
+        #     # the device is marked before uploading so the re-setup (which can
+        #     # start while this call is still returning) skips the upload.
+        #     reconnect_event = threading.Event()
+        #     h1pro_reconnected[device_key] = reconnect_event
+        #     uploaded_gif_devices.add(device_key)
+        #     try:
+        #         device.upload_gif("img/backgroud_test.gif")
+        #     except RuntimeError as exc:
+        #         # The upload may have committed before the firmware reset the
+        #         # USB connection. In that case the old handle times out while
+        #         # the hotplug callback has already opened the new handle.
+        #         if "0x05000301" in str(exc) and reconnect_event.wait(5):
+        #             print("H1Pro special function: upload restarted the device; continuing on the new handle")
+        #             return
+        #         uploaded_gif_devices.discard(device_key)
+        #         raise
+        #     except Exception:
+        #         uploaded_gif_devices.discard(device_key)
+        #         raise
+        #     else:
+        #         if reconnect_event.wait(3):
+        #             # The hotplug callback owns mode and key setup from here on.
+        #             return
+        #     finally:
+        #         h1pro_reconnected.pop(device_key, None)
+        # Playback is a separate operation; H1 Pro has no background GIF stream.
+        device.switch_mode(device.DeviceMode.GIF)
+        time.sleep(5)
+        print("H1Pro special function: switching to SCREENSAVER mode")
+        device.switch_mode(device.DeviceMode.SCREENSAVER)
+        # res = device.set_background_image("img/backgroud_test.png")
+        time.sleep(5)
+        print("H1Pro special function: switching to KEY mode")
+        device.switch_mode(device.DeviceMode.KEY)
+        #  for H1Pro,clearAllIcon and refresh is necessary for switching Key mode.
+        device.clearAllIcon()
+        device.refresh()
+        time.sleep(5)
 
     for i in device.image_keys():
         if 0 == i % 3:
@@ -184,7 +249,7 @@ def main():
     time.sleep(0.5)
 
     manner = DeviceManager()
-    streamdocks = manner.enumerate()
+    streamdocks = list(manner.enumerate())
 
     # Listen for device plug/unplug events
     listen_thread = threading.Thread(
@@ -203,6 +268,7 @@ def main():
     else:
         print("Found {} Stream Dock(s).\n".format(len(streamdocks)))
 
+    # Hotplug mutates manner.streamdocks; this list is the initial snapshot.
     for device in streamdocks:
         setup_device(device)
 

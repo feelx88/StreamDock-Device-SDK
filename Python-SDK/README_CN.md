@@ -9,6 +9,32 @@
 | macOS (x64,arm64)  | ✅ 支持  | 使用轮询模式监听设备                   |
 
 ## 安装指南
+### H1 Pro / H1 ProE
+
+两款设备均为 3 行 × 4 列、12 个按键，无旋钮。背景尺寸为 320 × 240，按键图像尺寸为 64 × 64。
+H1 Pro 使用 `5548:1030`，H1 ProE 使用 `5548:1033`，枚举后均为 `StreamDockH1Pro`。
+
+```python
+from StreamDock.Devices.StreamDockH1Pro import StreamDockH1Pro
+
+# device 为已打开并初始化的 H1 Pro / H1 ProE 实例
+device.switch_mode(StreamDockH1Pro.DeviceMode.SCREENSAVER)  # 1：屏保模式
+device.set_touchscreen_image("background.jpg")
+device.switch_mode(StreamDockH1Pro.DeviceMode.KEY)          # 2：按键模式
+device.set_key_image(1, "key.png")                         # 按键 1–12
+device.upload_gif("animation.gif")                         # 仅上传，不切换模式
+device.switch_mode(StreamDockH1Pro.DeviceMode.GIF)          # 3：播放已上传的动图
+```
+
+`switch_mode()` 的枚举值为 0、1、2，分别对应设备模式 1、2、3。`upload_gif()` 需要 `PATH` 中有 `ffmpeg`；SDK 会调整尺寸、帧率和画质以符合设备 320 × 240、5 MiB 的限制。H1 Pro 不支持背景 GIF 推帧；`upload_gif()` 只上传文件，随后须显式切换到 GIF 模式播放。使用新接口前需要构建更新后的 TransportDLL。按键编号与硬件 ID 直接映射，布局如下（十六进制）：
+
+```text
+01 02 03 04
+05 06 07 08
+09 0A 0B 0C
+```
+
+图像旋转沿用 Mini 的 90° 约定，需实机验证。
 
 ### 🔧 Linux 平台
 

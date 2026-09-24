@@ -26,6 +26,31 @@
 | StreamDock M3       |
 | StreamDock Mini     |
 | K1Pro               |
+| H1 Pro / H1 ProE     |
+
+H1 Pro (`5548:1030`) 与 H1 ProE (`5548:1033`) 均显示为 `H1Pro`。设备有 3 行 × 4 列共 12 个按键，编号从左到右、从上到下为 1～12；按键图片为 64 × 64，背景图片为 320 × 240。现有的 `setKeyImg`、`setBackgroundImg`、`setBrightness` 和 `read` 事件可直接使用。
+
+H1 Pro 专用事件：
+
+```json
+{ "event": "switchH1ProMode", "path": "设备路径的 Base64", "payload": { "mode": "keys" } }
+{ "event": "uploadH1ProGif", "path": "设备路径的 Base64", "payload": { "imagePath": "E:/images/animation.gif" } }
+{ "event": "uploadH1ProMp4", "path": "设备路径的 Base64", "payload": { "videoPath": "E:/images/animation.mp4" } }
+```
+
+`mode` 支持 `screensaver`、`keys`、`gif`。`gif` 模式播放上传到设备存储的整屏动图；按键 GIF 是独立功能，仍可使用 `setKeyGif` 和 `startGifLoop` 在 `keys` 模式下播放。H1 Pro 不支持 `setBackgroundGif` 的背景帧流。
+
+`uploadH1ProGif` 由 **WebSocket 服务进程**调用 ffmpeg。须安装 ffmpeg，并将其可执行文件所在目录加入服务进程的 `PATH` 环境变量；启动服务前可在同一终端执行 `ffmpeg -version` 验证。SDK 会把 GIF 转成 MJPEG MP4，并降低帧率或画质以符合 5 MiB 上限。
+
+`uploadH1ProMp4` **不转换或验证编码**，只上传文件字节。文件须预先处理为 **MP4 容器、MJPEG 视频编码、240 × 320 像素的竖向帧、无音轨、大小不超过 5 MiB**。设备的逻辑背景尺寸为 320 × 240；下面的命令按参考 SDK 的方向将源画面逆时针旋转 90° 后放入 240 × 320 画布。30 fps 和画质 6 是初始设置；若文件超过 5 MiB，可降低帧率或提高 `-q:v` 数值。
+
+```bash
+ffmpeg -i input.gif -an -vf "fps=30,transpose=2,scale=240:320:force_original_aspect_ratio=decrease,pad=240:320:(ow-iw)/2:(oh-ih)/2,format=yuvj420p" -c:v mjpeg -q:v 6 animation.mp4
+```
+
+GIF 或 MP4 上传完成后，设备固件会重启并通过 USB **重新枚举**，旧设备句柄随即失效。客户端应等待新的 `deviceDidConnect`，使用该事件给出的设备路径发送 `switchH1ProMode`，选择 `gif` 播放。`docs/test.js` 演示了等待重连、切换模式和按键 GIF 测试；设置 `H1PRO_TEST_MP4_PATH` 可额外测试已处理 MP4 上传。
+
+SDK 在 H1Pro 打开或重连时清空按键、刷新并发送首次 `CONNECT` 心跳，然后发布连接事件。测试程序在切换到 `gif` 前再刷新并等待约 2 秒，与参考 SDK 的测试顺序一致。`switchH1ProMode` 成功写入设备后会返回同名事件和 `{ "mode": "gif" }`，此回执只确认写入成功，不表示屏幕内容已开始播放。
 
 ## OEM 设备别名
 
@@ -60,6 +85,7 @@ WebsocketSDK.exe -oem N4Pro:0x1234:0x5678 -oem XL:0x2345:0x6789
 | `M3`     | StreamDock M3     |
 | `Mini`   | StreamDock Mini   |
 | `K1Pro`  | K1Pro             |
+| `H1Pro`  | H1 Pro / H1 ProE |
 
 ## Linux 运行依赖
 

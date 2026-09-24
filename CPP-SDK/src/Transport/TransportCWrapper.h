@@ -138,6 +138,11 @@ public:
 	 */
 	void setBackgroundImgStream(const std::string &jpegData, int32_t timeoutMs = 3000) const;
 
+	/** @brief Upload an MP4 (at most 5 MiB) for H1 Pro device-side playback. */
+	TransportResult uploadH1ProVideo(const std::string &mp4Data, uint32_t timeoutMs = 20000) const;
+	/** @brief Get the latest transport error message for this device. */
+	std::string lastErrorMessage() const;
+
 	/**
 	 * @brief Draw a JPEG frame at a specific position (used for animated backgrounds).
 	 * @param jpegData JPEG image data.

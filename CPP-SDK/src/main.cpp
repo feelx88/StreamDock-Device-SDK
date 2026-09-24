@@ -1,4 +1,5 @@
 #include <iostream>
+#include <vector>
 #include <DeviceManager/devicemanager.h>
 #include "test.h"
 
@@ -19,19 +20,28 @@ void doSomething(std::shared_ptr<StreamDock> device)
 	TEST_M18V3::test(device);
 	TEST_Mini::test(device);
 	TEST_K1Pro::test(device);
+	TEST_H1Pro::test(device);
 }
 
 int main()
 {
 	DeviceManager::instance().enumerator();
+	std::vector<std::shared_ptr<StreamDock>> initialDevices;
+	for (const auto& entry : DeviceManager::instance().getStreamDocks())
+		initialDevices.push_back(entry.second);
 	DeviceManager::instance().listen([](std::shared_ptr<StreamDock> device)
-									 { doSomething(device); });
-	auto &streamdocks = DeviceManager::instance().getStreamDocks();
-	for (const auto &device : streamdocks)
+		{
+			try { doSomething(device); }
+			catch (const std::exception& e)
+			{
+				std::cerr << "Hotplug setup failed: " << e.what() << std::endl;
+			}
+		});
+	for (const auto &device : initialDevices)
 	{
 		try
 		{
-			doSomething(device.second);
+			doSomething(device);
 		}
 		catch (const std::exception &e)
 		{
@@ -42,7 +52,7 @@ int main()
 			std::cerr << "Unknown exception occurred" << std::endl;
 		}
 	}
-	if(streamdocks.empty())
+	if(initialDevices.empty())
 	{
 		std::cout << "No StreamDock devices found. Connect a device to run tests and check your PID && VID." << std::endl;
 	}

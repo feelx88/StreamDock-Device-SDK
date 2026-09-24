@@ -28,6 +28,7 @@ enum class DeviceOriginType
 	SDM3 = 0x09,	///< StreamDock StreamDockM3
 	K1Pro = 0x0A,	///< StreamDock K1Pro
 	SDMini = 0x0B,	///< StreamDock StreamDockMini
+	SDH1Pro = 0x0C, ///< StreamDock H1 Pro / H1 ProE
 };
 
 struct StreamDockInfo

@@ -122,6 +122,8 @@ extern "C"
 
 	TRANSPORT_API TransportResult transport_set_key_image_stream(TransportHandle handle, const char *jpeg, size_t length, uint8_t key_value);
 	TRANSPORT_API TransportResult transport_set_background_image_stream(TransportHandle handle, const char *jpeg, size_t length, uint32_t timeout_ms);
+	/// Upload an MP4 file (up to 5 MiB) to H1 Pro / H1 ProE for device-side playback.
+	TRANSPORT_API TransportResult transport_upload_h1pro_video(TransportHandle handle, const char *mp4, size_t length, uint32_t timeout_ms);
 
 	TRANSPORT_API TransportResult transport_set_background_frame_stream(TransportHandle handle, const char *jpeg, size_t length, uint16_t width, uint16_t height, uint16_t x, uint16_t y, uint8_t FBlayer);
 	TRANSPORT_API TransportResult transport_clear_background_frame_stream(TransportHandle handle, uint8_t postion);
@@ -137,8 +139,10 @@ extern "C"
 
 	/// N1 mode switch
 	TRANSPORT_API TransportResult transport_change_mode(TransportHandle handle, uint8_t mode);
+	
 	/// N1 page switch
 	TRANSPORT_API TransportResult transport_change_page(TransportHandle handle, uint8_t page);
+	
 	/// N1 skin bitmap setting
 	TRANSPORT_API TransportResult transport_set_n1_skin_bitmap(TransportHandle handle, const char *bitmap, size_t length, uint8_t skin_mode, uint8_t skin_page, uint8_t skin_status, uint8_t key_index, int32_t timeout_ms);
 

@@ -8,6 +8,10 @@
 // - WebSocket server running on ws://127.0.0.1:9002
 // - ws package: npm install ws
 // - Test images in img/ directory (resolved relative to project root)
+// - H1 Pro GIF upload: ffmpeg executable available on the server's PATH
+// - Optional H1PRO_TEST_MP4_PATH: MP4 container, MJPEG video, 240x320 portrait,
+//   no audio, at most 5 MiB, to test direct upload
+//   Uploading restarts and re-enumerates H1 Pro; use its new device path.
 //
 // Usage:
 // - Uncomment the test section you want to run
@@ -17,6 +21,7 @@
 const WebSocket = require('ws');
 const path = require('path');
 const fs = require('fs');
+const { spawnSync } = require('child_process');
 
 // =============================================================================
 // CONFIGURATION
@@ -67,12 +72,106 @@ function sendCommand(ws, event, path, payload = {}) {
     path: path,
     payload: payload
   };
-  console.log(`Sending: ${event}`);
   ws.send(JSON.stringify(command));
 }
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function uploadH1ProAndWaitForReconnect(ws, event, devicePath, deviceInfo, payload) {
+  return new Promise((resolve, reject) => {
+    let uploadError = '';
+    let errorTimer;
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error(`H1 Pro did not re-enumerate after ${event} within 8 minutes${uploadError ? `; server error: ${uploadError}` : ''}`));
+    }, 8 * 60 * 1000);
+
+    function cleanup() {
+      clearTimeout(timer);
+      clearTimeout(errorTimer);
+      ws.removeListener('message', onMessage);
+      ws.removeListener('close', onClose);
+    }
+
+    function onClose() {
+      cleanup();
+      reject(new Error('WebSocket closed while waiting for H1 Pro re-enumeration'));
+    }
+
+    function onMessage(data) {
+      const msg = JSON.parse(data);
+      if (msg.event === 'error' && msg.path === devicePath &&
+          typeof msg.payload?.message === 'string' && msg.payload.message.startsWith(`${event}:`)) {
+        uploadError = msg.payload.message;
+        console.warn(`[H1Pro] Upload reported an error; waiting for possible firmware restart: ${uploadError}`);
+        if (!errorTimer) {
+          errorTimer = setTimeout(() => {
+            cleanup();
+            reject(new Error(uploadError));
+          }, 30000);
+        }
+      }
+      if (msg.event === 'deviceDidDisconnect' && msg.path === devicePath) {
+        console.log('[H1Pro] Old USB handle disconnected');
+      }
+      if (msg.event !== 'deviceDidConnect' || msg.payload?.Type !== 'H1Pro') {
+        return;
+      }
+      if (deviceInfo.SerialNumber && msg.payload.SerialNumber !== deviceInfo.SerialNumber) {
+        return;
+      }
+      if (!deviceInfo.SerialNumber && msg.payload.ProductID !== deviceInfo.ProductID) {
+        return;
+      }
+      cleanup();
+      console.log(`[H1Pro] Re-enumerated; new device path: ${msg.path}`);
+      resolve(msg.path);
+    }
+
+    ws.on('message', onMessage);
+    ws.once('close', onClose);
+    sendCommand(ws, event, devicePath, payload);
+  });
+}
+
+function switchH1ProModeAndWait(ws, devicePath, mode) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error(`H1 Pro ${mode} mode command timed out`));
+    }, 10000);
+
+    function cleanup() {
+      clearTimeout(timer);
+      ws.removeListener('message', onMessage);
+      ws.removeListener('close', onClose);
+    }
+
+    function onClose() {
+      cleanup();
+      reject(new Error(`WebSocket closed while switching H1 Pro to ${mode} mode`));
+    }
+
+    function onMessage(data) {
+      const msg = JSON.parse(data);
+      if (msg.path !== devicePath) {
+        return;
+      }
+      if (msg.event === 'error' && msg.payload?.message?.startsWith('switchH1ProMode:')) {
+        cleanup();
+        reject(new Error(msg.payload.message));
+      } else if (msg.event === 'switchH1ProMode' && msg.payload?.mode === mode) {
+        cleanup();
+        resolve();
+      }
+    }
+
+    ws.on('message', onMessage);
+    ws.once('close', onClose);
+    sendCommand(ws, 'switchH1ProMode', devicePath, { mode });
+  });
 }
 
 function keyCountForDevice(deviceType) {
@@ -92,6 +191,7 @@ function keyCountForDevice(deviceType) {
     'M18': 18,
     'M3': 15,
     'K1Pro': 6,
+    'H1Pro': 12,
     'Mini': 6
   };
   return keyCounts[deviceType] || 18;
@@ -163,8 +263,6 @@ async function createConnectionAndListen() {
 
     ws.on('message', (data) => {
       const msg = JSON.parse(data);
-      console.log('Received:', msg);
-
       if (msg.event === 'deviceDidConnect') {
         devicePath = msg.path;
         console.log(`Device connected: ${msg.payload.Product}`);
@@ -199,7 +297,9 @@ async function testComprehensive() {
   console.log('\n=== COMPREHENSIVE TEST (Like Python SDK main.py) ===');
 
   try {
-    const { ws, devicePath, deviceInfo } = await createConnectionAndListen();
+    const connection = await createConnectionAndListen();
+    const { ws, deviceInfo } = connection;
+    let devicePath = connection.devicePath;
 
     console.log(`\nDevice Info:`);
     console.log(`  Path: ${deviceInfo.Path}`);
@@ -263,6 +363,55 @@ async function testComprehensive() {
       sendCommand(ws, 'setKeyboardLightingEffects', devicePath, { effect: 0 });
       sendCommand(ws, 'setKeyboardRGBBacklight', devicePath, { r: 255, g: 0, b: 0 });
       sendCommand(ws, 'setKeyboardOSMode', devicePath, { osMode: 0 });
+    }
+
+    // H1 Pro / H1 ProE special functions
+    if (deviceType === 'H1Pro') {
+      console.log('\n--- H1Pro special functions ---');
+      console.log('[H1Pro] Stage 1: check ffmpeg on PATH and upload the GIF');
+      const ffmpeg = spawnSync('ffmpeg', ['-version'], { stdio: 'ignore' });
+      if (ffmpeg.error || ffmpeg.status !== 0) {
+        console.warn('[H1Pro] ffmpeg is unavailable on PATH; skipping GIF upload');
+      } else if (!fs.existsSync(TEST_BACKGROUND_GIF_PATH)) {
+        console.warn(`[H1Pro] GIF asset is missing: ${TEST_BACKGROUND_GIF_PATH}`);
+      } else {
+        console.log('[H1Pro] Uploading GIF to device storage; firmware will restart');
+        devicePath = await uploadH1ProAndWaitForReconnect(
+          ws, 'uploadH1ProGif', devicePath, deviceInfo,
+          { imagePath: TEST_BACKGROUND_GIF_PATH }
+        );
+      }
+
+      const mp4Path = process.env.H1PRO_TEST_MP4_PATH;
+      if (mp4Path) {
+        console.log('[H1Pro] Stage 2: upload the prepared MJPEG MP4');
+        if (!fs.existsSync(mp4Path)) {
+          throw new Error(`H1PRO_TEST_MP4_PATH does not exist: ${mp4Path}`);
+        }
+        devicePath = await uploadH1ProAndWaitForReconnect(
+          ws, 'uploadH1ProMp4', devicePath, deviceInfo, { videoPath: mp4Path }
+        );
+      } else {
+        console.log('[H1Pro] Stage 2: MP4 upload skipped (set H1PRO_TEST_MP4_PATH to test it)');
+      }
+
+      console.log('[H1Pro] Stage 3: refresh the re-enumerated display and wait 2 seconds');
+      sendCommand(ws, 'refresh', devicePath, {});
+      await sleep(2000);
+      console.log('[H1Pro] Stage 4: switch to GIF mode');
+      await switchH1ProModeAndWait(ws, devicePath, 'gif');
+      console.log('[H1Pro] GIF mode command accepted');
+      await sleep(5000);
+      console.log('[H1Pro] Stage 5: switch to SCREENSAVER mode');
+      await switchH1ProModeAndWait(ws, devicePath, 'screensaver');
+      await sleep(5000);
+      console.log('[H1Pro] Stage 6: switch to KEYS mode');
+      await switchH1ProModeAndWait(ws, devicePath, 'keys');
+      sendCommand(ws, 'clearAllIcon', devicePath, {});
+      sendCommand(ws, 'refresh', devicePath, {});
+      await sleep(5000);
+      console.log('[H1Pro] Stage 7: set brightness and 12 key images/GIFs');
+      sendCommand(ws, 'setBrightness', devicePath, { brightness: 100 });
     }
 
     // N1 special functions
@@ -340,10 +489,13 @@ async function testComprehensive() {
     sendCommand(ws, 'refresh', devicePath, {});
     await sleep(500);
 
+    if (deviceType === 'H1Pro') {
+      console.log('[H1Pro] Stage 8: start key GIF playback loop (independent of device GIF mode)');
+    }
     sendCommand(ws, 'startGifLoop', devicePath, {});
 
     // Start input event listener
-    console.log('\n--- Starting input event listener ---');
+    console.log(deviceType === 'H1Pro' ? '\n[H1Pro] Stage 9: listen for key events' : '\n--- Starting input event listener ---');
     console.log('Press keys, rotate knobs, swipe, touch N4Pro touch bar, or toggle XL/Mini DIP switches to see events...');
     console.log('Press Ctrl+C to stop\n');
 

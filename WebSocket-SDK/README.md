@@ -26,6 +26,31 @@
 | StreamDock M3       |
 | StreamDock Mini     |
 | K1Pro               |
+| H1 Pro / H1 ProE     |
+
+H1 Pro (`5548:1030`) and H1 ProE (`5548:1033`) both appear as `H1Pro`. They have twelve keys in a 3 × 4 grid, numbered 1–12 from left to right and top to bottom. Key images are 64 × 64 and background images are 320 × 240. Existing `setKeyImg`, `setBackgroundImg`, `setBrightness`, and `read` events work with these devices.
+
+H1 Pro events:
+
+```json
+{ "event": "switchH1ProMode", "path": "base64 device path", "payload": { "mode": "keys" } }
+{ "event": "uploadH1ProGif", "path": "base64 device path", "payload": { "imagePath": "E:/images/animation.gif" } }
+{ "event": "uploadH1ProMp4", "path": "base64 device path", "payload": { "videoPath": "E:/images/animation.mp4" } }
+```
+
+Modes are `screensaver`, `keys`, and `gif`. The `gif` mode plays the uploaded full-screen animation from device storage. Animated key icons are separate: `setKeyGif` and `startGifLoop` work in `keys` mode. H1 Pro does not support `setBackgroundGif` frame streaming.
+
+For `uploadH1ProGif`, install ffmpeg and add its executable directory to the **WebSocket server process's `PATH`**. Run `ffmpeg -version` in the same terminal before starting the server to check. The SDK converts the GIF to MJPEG MP4 and retries at lower frame rates or quality to meet the 5 MiB limit.
+
+`uploadH1ProMp4` **does not transcode or validate the codec**. Supply an **MP4 container with MJPEG video, 240 × 320 portrait frames, no audio track, and a file size of at most 5 MiB**. The logical background is 320 × 240; this command follows the reference SDK's 90° counterclockwise rotation onto the portrait canvas. Start at 30 fps and quality 6; lower the frame rate or increase `-q:v` if the result exceeds 5 MiB.
+
+```bash
+ffmpeg -i input.gif -an -vf "fps=30,transpose=2,scale=240:320:force_original_aspect_ratio=decrease,pad=240:320:(ow-iw)/2:(oh-ih)/2,format=yuvj420p" -c:v mjpeg -q:v 6 animation.mp4
+```
+
+After a GIF or MP4 upload, the firmware restarts and **USB re-enumerates**; the old device handle is invalid. Wait for a new `deviceDidConnect` event, then use that event's path with `switchH1ProMode` set to `gif`. `docs/test.js` demonstrates reconnection, mode changes, and animated key icons. Set `H1PRO_TEST_MP4_PATH` to also test direct upload of a prepared MP4.
+
+When opening or reconnecting H1Pro, the SDK clears the keys, refreshes, and sends the first `CONNECT` heartbeat before publishing the connection event. The test refreshes again and waits about two seconds before selecting `gif`, following the reference SDK test sequence. A successful `switchH1ProMode` write returns an event of the same name with `{ "mode": "gif" }`. This acknowledges the command write, not visible playback.
 
 ## OEM Device Aliases
 
@@ -60,6 +85,7 @@ Available `Model` aliases are case-insensitive:
 | `M3`      | StreamDock M3 |
 | `Mini`    | StreamDock Mini |
 | `K1Pro`   | K1Pro |
+| `H1Pro`   | H1 Pro / H1 ProE |
 
 ## Linux Runtime Dependencies
 

@@ -35,8 +35,8 @@ class USBVendorIDs:
     USB_VID_K1_PROEU = 0x6603
     USB_VID_Mini = 0x5548
     USB_VID_MiniW = 0x5548
-    # VSD / VSDinside-branded Stream Dock M18
-    USB_VID_VSD_M18 = 0x5548
+    USB_VID_H1PRO = 0x5548
+    USB_VID_H1PROE = 0x5548
 
 
 class USBProductIDs:
@@ -78,7 +78,8 @@ class USBProductIDs:
     USB_PID_K1_PROEU = 0x1019
     USB_PID_Mini = 0x1036
     USB_PID_MiniW = 0x1037
-    USB_PID_VSD_M18 = 0x1000
+    USB_PID_STREAMDOCK_H1PRO = 0x1030
+    USB_PID_STREAMDOCK_H1PROE = 0x1033
 
 
 from .Devices.StreamDock293 import StreamDock293
@@ -94,6 +95,7 @@ from .Devices.StreamDockM18 import StreamDockM18
 from .Devices.StreamDockM3 import StreamDockM3
 from .Devices.K1Pro import K1Pro
 from .Devices.StreamDockMini import StreamDockMini
+from .Devices.StreamDockH1Pro import StreamDockH1Pro
 
 g_products = [
     # 293 serial
@@ -154,8 +156,6 @@ g_products = [
     # M18/M18V2/M18V25/M18V3
     (USBVendorIDs.USB_VID_M18, USBProductIDs.USB_PID_STREAMDOCK_M18, StreamDockM18),
     (USBVendorIDs.USB_VID_M18EN, USBProductIDs.USB_PID_STREAMDOCK_M18EN, StreamDockM18),
-    # VSD-branded M18: same hardware, VID 0x5548 / PID 0x1000
-    (USBVendorIDs.USB_VID_VSD_M18, USBProductIDs.USB_PID_VSD_M18, StreamDockM18),
     # (USBVendorIDs.USB_VID_M18V2, USBProductIDs.USB_PID_STREAMDOCK_M18V2, StreamDockM18),
     # (USBVendorIDs.USB_VID_M18V2EN, USBProductIDs.USB_PID_STREAMDOCK_M18V2EN, StreamDockM18),
     # (USBVendorIDs.USB_VID_M18V25, USBProductIDs.USB_PID_STREAMDOCK_M18V25, StreamDockM18),
@@ -169,6 +169,9 @@ g_products = [
     (USBVendorIDs.USB_VID_K1_PRO, USBProductIDs.USB_PID_K1_PRO, K1Pro),
     (USBVendorIDs.USB_VID_K1_PRO_1, USBProductIDs.USB_PID_K1_PRO_1, K1Pro),
     (USBVendorIDs.USB_VID_K1_PROEU, USBProductIDs.USB_PID_K1_PROEU, K1Pro),
+    # H1 Pro / H1 ProE
+    (USBVendorIDs.USB_VID_H1PRO, USBProductIDs.USB_PID_STREAMDOCK_H1PRO, StreamDockH1Pro),
+    (USBVendorIDs.USB_VID_H1PROE, USBProductIDs.USB_PID_STREAMDOCK_H1PROE, StreamDockH1Pro),
     # Mini
     (USBVendorIDs.USB_VID_Mini, USBProductIDs.USB_PID_Mini, StreamDockMini),
     (USBVendorIDs.USB_VID_MiniW, USBProductIDs.USB_PID_MiniW, StreamDockMini),

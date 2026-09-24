@@ -253,6 +253,15 @@ _transport_lib.transport_set_background_image_stream.argtypes = [
     c_uint32,
 ]
 
+try:
+    _transport_lib.transport_upload_h1pro_video.restype = c_uint32
+    _transport_lib.transport_upload_h1pro_video.argtypes = [
+        c_void_p, c_char_p, c_size_t, c_uint32,
+    ]
+    _H1PRO_VIDEO_UPLOAD_AVAILABLE = True
+except AttributeError:
+    _H1PRO_VIDEO_UPLOAD_AVAILABLE = False
+
 _transport_lib.transport_set_background_frame_stream.restype = c_uint32
 _transport_lib.transport_set_background_frame_stream.argtypes = [
     c_void_p,
@@ -616,6 +625,20 @@ class LibUSBHIDAPI:
         _transport_lib.transport_set_background_bitmap(
             self._handle, bitmap_data, len(bitmap_data), timeout_ms
         )
+
+    def upload_h1pro_video(self, mp4_data: bytes, timeout_ms: int = 20000) -> None:
+        """Upload one MP4 to H1 Pro / ProE and wait for device acknowledgements."""
+        if not _H1PRO_VIDEO_UPLOAD_AVAILABLE:
+            raise RuntimeError("transport.dll lacks transport_upload_h1pro_video; rebuild TransportDLL")
+        if not self._handle:
+            raise RuntimeError("Device is not open")
+        result = _transport_lib.transport_upload_h1pro_video(
+            self._handle, mp4_data, len(mp4_data), timeout_ms
+        )
+        if result != 0:
+            detail = self.get_last_error_info().get("error_message", "")
+            suffix = f" ({detail})" if detail else ""
+            raise RuntimeError(f"H1 Pro video upload failed: 0x{result:08X}{suffix}")
 
     def set_key_image_stream(self, jpeg_data: bytes, key_index: int) -> None:
         """

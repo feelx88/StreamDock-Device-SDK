@@ -1,5 +1,11 @@
 # StreamDock C++ SDK 文档
 
+## H1 Pro / H1 ProE
+
+H1 Pro（`5548:1030`）和 H1 ProE（`5548:1033`）共用 `StreamDockH1Pro` 类。设备有 3 行 × 4 列共 12 个按键，按键图片为 64 × 64，背景图片为 320 × 240。按键编号从左到右、从上到下依次为 1～12。
+
+可使用 `setKeyImgFile()`、`setBackgroundImgFile()` 和 `setKeyBrightness()` 设置图片与亮度。`switchMode()` 支持 `Screensaver`、`Keys`、`Gif`。动图由设备本地播放，不支持背景 GIF 推帧。`uploadGifFile("animation.gif")` 使用 `PATH` 中的 ffmpeg 转换并上传 GIF；超过 5 MiB 或设备存储空间不足时会尝试更低画质。`uploadMp4File()` 和 `uploadMp4Stream()` 也可上传预先处理好的 MJPEG MP4 数据。这些上传接口返回 `TransportResult`。上传可能使 USB 设备重启；重新连接后切换到 `Gif` 模式即可播放。`src/test.h` 中的 `TEST_H1Pro` 现在会在每次程序运行时为每台设备上传一次 `img/test.gif`，处理重新枚举，依次切换模式，设置静态和动图按键，并注册按键回调。
+
 ## 1. 📘 本项目介绍
 
 本项目是一个基于 C++17 开发的 SDK，旨在让用户能够通过代码直接控制 Stream Dock 设备。

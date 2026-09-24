@@ -88,7 +88,7 @@ add_subdirectory(ImgProcesser)
 add_subdirectory(src/Transport)
 
 # Collect Hotspot device sources
-file(GLOB_RECURSE HOTSPOTDEVICE
+file(GLOB_RECURSE HOTSPOTDEVICE CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/src/HotspotDevice/**/*.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/HotspotDevice/**/*.h"
 )

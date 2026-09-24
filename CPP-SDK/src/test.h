@@ -1,10 +1,13 @@
 #pragma once
 #include <array>
 #include <chrono>
+#include <condition_variable>
 #include <iostream>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
+#include <unordered_set>
 #include <utility>
 #include <streamdock.h>
 #include <OpenCVImageEncoder.h>
@@ -16,6 +19,7 @@
 #include <HotspotDevice/StreamDockM18V3/streamdockM18V3.h>
 #include <HotspotDevice/StreamDockMini/streamdockMini.h>
 #include <HotspotDevice/K1Pro/K1Pro.h>
+#include <HotspotDevice/StreamDockH1Pro/streamdockH1Pro.h>
 
 template <typename T, typename... Args>
 static void debugPrint(T &&first, Args &&...rest)
@@ -776,5 +780,109 @@ namespace TEST_Mini
 											   { debugPrint("dip 2 pressed"); }, RegisterEvent::DIPPress);
 		device->reader()->registerReadCallback(12, []()
 											   { debugPrint("dip 2 release"); }, RegisterEvent::DIPRelease);
+	}
+}
+
+namespace TEST_H1Pro
+{
+	struct UploadState
+	{
+		std::mutex mutex;
+		std::condition_variable reconnectedCv;
+		std::unordered_set<std::wstring> uploadedDevices;
+		std::unordered_set<std::wstring> reconnectedDevices;
+	};
+
+	UploadState& uploadState()
+	{
+		static UploadState state;
+		return state;
+	}
+
+	void test(std::shared_ptr<StreamDock> device)
+	{
+		if (device->info()->originType != DeviceOriginType::SDH1Pro)
+			return;
+		auto h1pro = std::dynamic_pointer_cast<StreamDockH1Pro>(device);
+		const auto serial = device->info()->serialNumber;
+		device->setEncoder(std::make_shared<OpenCVImageEncoder>());
+		device->refresh();
+		std::this_thread::sleep_for(std::chrono::seconds(2));
+
+		// Upload GIF
+		// auto& state = uploadState();
+		// bool uploadNeeded = false;
+		// {
+		// 	std::lock_guard<std::mutex> lock(state.mutex);
+		// 	uploadNeeded = state.uploadedDevices.insert(serial).second;
+		// 	if (!uploadNeeded)
+		// 	{
+		// 		// The upload restarted the device. Continue setup on its new HID handle.
+		// 		state.reconnectedDevices.insert(serial);
+		// 		state.reconnectedCv.notify_all();
+		// 	}
+		// }
+
+		// if (uploadNeeded)
+		// {
+		// 	// ffmpeg must be on PATH. Uploading a GIF restarts and re-enumerates the device.
+		// 	// test.gif is the GIF asset available in this C++ SDK's img directory.
+		// 	std::cout << "H1Pro special function: uploading a GIF" << std::endl;
+		// 	const auto result = h1pro->uploadGifFile("../../img/test.gif");
+		// 	if (result != TRANSPORT_SUCCESS && result != TRANSPORT_ERROR_TIMEOUT_OPERATION)
+		// 	{
+		// 		std::lock_guard<std::mutex> lock(state.mutex);
+		// 		state.uploadedDevices.erase(serial);
+		// 		std::cerr << "H1 Pro: GIF upload failed, result " << result
+		// 			<< " (check that ffmpeg is on PATH and img/test.gif is available)" << std::endl;
+		// 		return;
+		// 	}
+		// 	std::unique_lock<std::mutex> lock(state.mutex);
+		// 	const bool reconnected = state.reconnectedCv.wait_for(lock, std::chrono::seconds(5), [&]()
+		// 		{ return state.reconnectedDevices.count(serial) != 0; });
+		// 	if (reconnected)
+		// 	{
+		// 		std::cout << "H1Pro special function: upload restarted the device; continuing on the new handle" << std::endl;
+		// 		return;
+		// 	}
+		// 	if (result != TRANSPORT_SUCCESS)
+		// 	{
+		// 		state.uploadedDevices.erase(serial);
+		// 		std::cerr << "H1 Pro: upload timed out without reconnection" << std::endl;
+		// 		return;
+		// 	}
+		// }
+		// else
+		// 	std::cout << "H1Pro special function: GIF already uploaded, skipping upload" << std::endl;
+
+		std::cout << "H1Pro special function: switching to GIF mode" << std::endl;
+		h1pro->switchMode(StreamDockH1Pro::Mode::Gif);
+		std::this_thread::sleep_for(std::chrono::seconds(5));
+		std::cout << "H1Pro special function: switching to SCREENSAVER mode" << std::endl;
+		h1pro->switchMode(StreamDockH1Pro::Mode::Screensaver);
+		std::this_thread::sleep_for(std::chrono::seconds(5));
+		std::cout << "H1Pro special function: switching to KEY mode" << std::endl;
+		h1pro->switchMode(StreamDockH1Pro::Mode::Keys);
+		device->clearAllKeys();
+		device->refresh();
+		std::this_thread::sleep_for(std::chrono::seconds(5));
+
+		device->reader()->startReadLoop();
+		device->setKeyBrightness(100);
+		for (uint8_t key = 1; key <= 12; ++key)
+		{
+			if (key % 3 == 0)
+				device->gifer()->setKeyGifFile("../../img/test.gif", key);
+			else if (key % 3 == 1)
+				device->setKeyImgFile("../../img/button_test.jpg", key);
+			else
+				device->setKeyImgFile("../../img/mark.png", key);
+			device->reader()->registerReadCallback(key, [key]()
+				{ debugPrint("Key " + std::to_string(key) + " pressed"); }, RegisterEvent::KeyPress);
+			device->reader()->registerReadCallback(key, [key]()
+				{ debugPrint("Key " + std::to_string(key) + " released"); }, RegisterEvent::KeyRelease);
+		}
+		device->gifer()->startGifLoop();
+		device->refresh();
 	}
 }

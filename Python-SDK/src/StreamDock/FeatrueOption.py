@@ -15,6 +15,7 @@ class device_type(Enum):
     dock_xl=11
     k1pro=12
     dock_mini=13
+    dock_h1pro=14
     
 class FeatrueOption:
     def __init__(self):
