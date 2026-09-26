@@ -316,6 +316,45 @@ Ruled out (don't re-investigate): the vendor `.so` itself (binary, and
 display-wake in `loginctl_handler.py` (unlock path only, not on the refresh
 loop).
 
+## 2026-09-26 — Stale icon on keys that have no icon on the new page
+
+Symptom: after a page change, a key that has **no icon** configured for the
+current page keeps showing the icon from the *previous* page instead of an empty
+button. Seen mainly in Elite Dangerous "space ship mode", where pages are changed
+with the little wheel — hence "sometimes".
+
+Two things combine to cause it:
+
+1. `Layers.set_layer_relative()` (layers.py) **mutates `self.layer` /
+   `self.sub_layer` first** and only then calls
+   `set_layer(self.layer, new_sub_layer=self.sub_layer)`. Inside `set_layer()`
+   the guard `if new_layer != self.layer or new_sub != self.sub_layer` is
+   therefore already **False** (the values match, because they were pre-mutated),
+   so **`clearAllIcon()` never runs** for wheel-driven page changes. The panel is
+   not blanked. (Key-press page changes via `set_layer(0)` / `set_layer(1)` /
+   `set_layer(2)` / `set_layer(3)` from keys.py *do* clear — that is why the bug
+   only shows up on some page changes.)
+2. `refresh()` in main.py reacts to a sublayer change by wiping the
+   `_last_images` cache, then deduped with
+   `if _last_images.get(key) == image: continue`. A key with no icon has
+   `image is None`, and a **missing** dict entry also returns `None`, so
+   `None == None` → `continue` → `clearIcon()` was **skipped** for every
+   icon-less key. With no `clearAllIcon()` to fall back on, the previous page's
+   icon stayed on screen. Because the key is never marked, it stayed wrong
+   until some later page happened to give that key an icon again.
+
+Fix: an unknown cache entry must never compare equal to a desired state of
+`None`. Added a module-level `_UNKNOWN = object()` sentinel in main.py and
+changed the test to `_last_images.get(key, _UNKNOWN) == image`. Now a wiped
+cache makes icon-less keys issue their `clearIcon()` once and then settle, so
+they correctly show an empty button.
+
+Note: only the `refresh()` dedup was fixed. The `set_layer_relative()` →
+`set_layer()` pre-mutation quirk (no `clearAllIcon()` on relative page changes)
+was left alone deliberately — it is load-bearing for the single-page-rotation
+blank fix below, and the sentinel makes the app correct without it. Don't "fix"
+the pre-mutation without re-checking that section.
+
 ## 2026-09-19 — Icons vanish after ~3rd page change, only restart recovers
 
 Symptom: after app restart, all 6 key icons are fine for ~2 page changes, then

@@ -44,6 +44,14 @@ refresh_event = Event()
 _last_images = {}
 _last_sublayer = None
 
+# Sentinel for "we have no record of what this key is currently showing".
+# It must NOT be None: a key with no icon has a desired state of None, and
+# dict.get() also returns None for a missing key, so a plain
+# `_last_images.get(key) == image` test would treat "unknown" and "correctly
+# blank" as the same thing and skip the clearIcon(). See the comment in
+# refresh() for the stale-icon symptom that caused.
+_UNKNOWN = object()
+
 # Number of consecutive refresh ticks in which at least one key failed to
 # draw. The transport is a vendor C library: once a USB reset / re-enumeration
 # kills the handle it keeps failing (e.g. "hid_write FAILED, res=-1 error:
@@ -92,7 +100,16 @@ def refresh(device):
         for key in range(1, 7):
             image = entries.get(key)
 
-            if _last_images.get(key) == image:
+            # A missing cache entry must not compare equal to a desired state of
+            # None, otherwise a key with no icon on the current page looks
+            # "already correct" and is never cleared. That is exactly what
+            # happened after a wheel-driven page change: set_layer_relative()
+            # mutates sub_layer before calling set_layer(), so set_layer()'s
+            # "did the page really change" guard is already false and
+            # clearAllIcon() never runs; the cache is then wiped just above, and
+            # the None == None test made every icon-less key skip its
+            # clearIcon(), leaving the previous page's icon on screen.
+            if _last_images.get(key, _UNKNOWN) == image:
                 continue
 
             if image is None:
