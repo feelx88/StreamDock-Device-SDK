@@ -282,8 +282,9 @@ typically after a bus reset or re-enumeration.
 Root cause — the draw cache mistook the error for success:
 
 - `transport_set_key_image_stream` is declared with **`restype = c_uint32`**
-  (LibUSBHIDAPI.py:240). The C lib returns `-1` on failure, but ctypes reads it
-  **unsigned**, so Python sees **4294967295**.
+  (the `restype`/`argtypes` block near the top of `LibUSBHIDAPI.py`). The C lib
+  returns `-1` on failure, but ctypes reads it **unsigned**, so Python sees
+  **4294967295**.
 - The earlier 2026-09-19 fix tested `if result is None or result >= 0:` before
   caching `_last_images[key]`. `4294967295 >= 0` is **True**, so a *failed* draw
   was cached as "already drawn".
@@ -292,7 +293,12 @@ Root cause — the draw cache mistook the error for success:
   exactly **one** failure line and then nothing. Restarting resets the
   module-global and "fixes" it.
 - The SDK's own success value is `0` (`TRANSPORT_SUCCESS`, the same convention it
-  uses at LibUSBHIDAPI.py:544/987/1213); a dead handle returns `None`.
+  uses throughout `LibUSBHIDAPI.py`, e.g. `if result == 0:  # TRANSPORT_SUCCESS is 0`
+  in `read()` / the bitmap paths, and `if result != 0:` in the H1 Pro upload); a
+  dead handle returns `None`. Upstream's H1 Pro code was added after this and
+  independently uses the same `!= 0` = failure convention, which corroborates it.
+  Do NOT cite bare line numbers for these — they drift on every SDK sync; cite
+  the construct instead.
 
 Fix in `app/main.py refresh()`:
 
@@ -315,6 +321,41 @@ Ruled out (don't re-investigate): the vendor `.so` itself (binary, and
 (the transport reads the file synchronously inside the call); the cursor-only
 display-wake in `loginctl_handler.py` (unlock path only, not on the refresh
 loop).
+
+## 2026-09-26 — Baseline rebased onto upstream `87ff566` (H1 Pro support)
+
+`feelx88` was rebased onto upstream `origin/main` = `87ff566` ("add H1 Pro
+support" across CPP/Python/WebSocket SDKs). All 14 app commits replayed.
+
+**Two conflicts, both in `Python-SDK/src/main.py`, both resolved the same way:
+take the new-main ("ours") side.** Reason: the oldest app commits
+(`8076b65`/`c6e6180`) still wrote the app *into* `Python-SDK/src/`, and
+`8480c0f` later moved it back out to `app/`. The intermediate history therefore
+tries to re-apply app code to an SDK file that upstream has since edited. Since
+the invariant is "`Python-SDK/` stays byte-identical to upstream", the new-main
+side always wins there. Intermediate commits need not be functional — only the
+final tree does.
+
+**Resolution rule for future rebases: any conflict under `Python-SDK/` → take
+ours (new main). Conflicts under `app/` → stop and think, because `app/` is
+untouched by upstream and should never conflict.** Verify afterwards with
+`git diff origin/main HEAD -- Python-SDK/` (must be empty).
+
+Verified after the rebase, i.e. all the assumptions the two fixes below rest on
+still hold on the new SDK:
+
+- `transport_set_key_image_stream.restype` is still `c_uint32`.
+- `set_key_image_stream()` still returns the raw `res` (`None` on a dead handle).
+- `clear_key()` still returns **no status at all**.
+- `StreamDock.open()` still calls `self.transport.open(bytes(path, "utf-8"))`,
+  so the re-init recovery really does re-acquire a stale handle.
+- The replaced `libtransport*.so` binaries load, and the new H1 Pro symbol is
+  present.
+- New upstream H1 Pro code independently uses `if result != 0:` as its failure
+  test — same `0 == success` convention our fix relies on.
+
+Also note `app/GEMINI.md` exists alongside `app/MEMORY.md`; the top-level
+`LLM-linux-instructions.md` is the authoritative instruction set.
 
 ## 2026-09-26 — Stale icon on keys that have no icon on the new page
 
