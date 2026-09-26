@@ -266,6 +266,56 @@ contains an instruction set written for LLM agents working on this repo.
 Re-read it whenever beginning a fresh session or when told there is useful
 context at the top level.
 
+## 2026-09-26 — Dock goes mute until app restart (`hid_write ... Protocol error`)
+
+Symptom: out of nowhere mid-session the dock stops responding entirely — panel
+frozen, keys dead — and only restarting the app brings it back. The journal
+shows a single line then silence:
+
+    [send] hid_write FAILED, res=-1 error: Protocol error
+
+That message is printed by the **vendor C transport** (`libtransport.so`, a
+prebuilt binary under `Python-SDK/src/StreamDock/Transport/TransportDLL/`), not
+by the Python SDK or the app. `EPROTO` means the USB endpoint/handle went bad,
+typically after a bus reset or re-enumeration.
+
+Root cause — the draw cache mistook the error for success:
+
+- `transport_set_key_image_stream` is declared with **`restype = c_uint32`**
+  (LibUSBHIDAPI.py:240). The C lib returns `-1` on failure, but ctypes reads it
+  **unsigned**, so Python sees **4294967295**.
+- The earlier 2026-09-19 fix tested `if result is None or result >= 0:` before
+  caching `_last_images[key]`. `4294967295 >= 0` is **True**, so a *failed* draw
+  was cached as "already drawn".
+- From then on `if _last_images.get(key) == image: continue` skipped every key
+  forever and the app never issued another write — which is why the log shows
+  exactly **one** failure line and then nothing. Restarting resets the
+  module-global and "fixes" it.
+- The SDK's own success value is `0` (`TRANSPORT_SUCCESS`, the same convention it
+  uses at LibUSBHIDAPI.py:544/987/1213); a dead handle returns `None`.
+
+Fix in `app/main.py refresh()`:
+
+- Cache a key **only** when `device.set_key_image(...) == 0`. Any other value
+  (unsigned error code, or `None` from a dead handle) stays uncached and is
+  retried on the next 0.3 s tick.
+- `clearIcon()` returns **no status at all** in this SDK, so it is cached
+  unconditionally (it cannot be half-verified; re-issuing it every tick would
+  just spam the bus).
+- Added bounded recovery: refresh ticks containing a failure extend a
+  `_write_failures` streak (reset by any fully clean tick). Once it reaches
+  `WRITE_FAILURE_LIMIT` (10 ticks ≈ 3 s) the main loop closes the device and
+  lets the outer loop re-enumerate and `open()` it again — the same recovery
+  path already used when the refresh thread dies. `open()` calls
+  `transport.open(path)`, so a stale handle is genuinely re-acquired. This is
+  what makes the dock heal by itself instead of needing a restart.
+
+Ruled out (don't re-investigate): the vendor `.so` itself (binary, and
+`Python-SDK/` must stay upstream-verbatim); `sdk_patch.py`'s tempfile lifecycle
+(the transport reads the file synchronously inside the call); the cursor-only
+display-wake in `loginctl_handler.py` (unlock path only, not on the refresh
+loop).
+
 ## 2026-09-19 — Icons vanish after ~3rd page change, only restart recovers
 
 Symptom: after app restart, all 6 key icons are fine for ~2 page changes, then
@@ -290,6 +340,11 @@ Fix: in `app/main.py refresh()` only cache `_last_images[key] = image` when
 the draw **succeeded** (`result >= 0` / `result is None`); on failure leave the
 key uncached so it self-heals on the next 0.3 s refresh tick. Transient losses
 no longer become permanent-until-restart.
+
+> **SUPERSEDED 2026-09-26 — the success test above is wrong.** The SDK returns
+> that status as `c_uint32`, so a real failure arrives as `4294967295`, which
+> passes `result >= 0`. The cache therefore still poisoned itself on transport
+> errors. The correct test is `== 0`. See the 2026-09-26 section above.
 
 Also confirmed during this investigation (ruled out, don't re-investigate):
 - The `sdk_patch.py` tempfile lifecycle is NOT the bug. The transport's

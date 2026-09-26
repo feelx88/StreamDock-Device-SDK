@@ -44,6 +44,16 @@ refresh_event = Event()
 _last_images = {}
 _last_sublayer = None
 
+# Number of consecutive refresh ticks in which at least one key failed to
+# draw. The transport is a vendor C library: once a USB reset / re-enumeration
+# kills the handle it keeps failing (e.g. "hid_write FAILED, res=-1 error:
+# Protocol error") and the app would otherwise keep hammering a dead device
+# forever. The main loop watches this streak and re-initialises the device once
+# it crosses WRITE_FAILURE_LIMIT, so a wedged transport heals without an app
+# restart.
+_write_failures = 0
+WRITE_FAILURE_LIMIT = 10
+
 ydotool = YDoToolHandler(cmd_lock)
 pulse = PulseAudioHandler(config)
 hass = HomeAssistantHandler(config, hass_lock)
@@ -58,7 +68,7 @@ layers = Layers(ydotool, pulse, hass, mpd, playerctl, loginctl, elite)
 
 
 def refresh(device):
-    global _last_images, _last_sublayer
+    global _last_images, _last_sublayer, _write_failures
 
     for handler in handlers:
         handler.update()
@@ -78,6 +88,7 @@ def refresh(device):
             _last_images.clear()
             _last_sublayer = sublayer
 
+        failed = 0
         for key in range(1, 7):
             image = entries.get(key)
 
@@ -85,20 +96,32 @@ def refresh(device):
                 continue
 
             if image is None:
-                result = device.clearIcon(key)
-            else:
-                result = device.set_key_image(key, image)
+                # clearIcon() reports no status at all in the current SDK, so
+                # there is nothing to verify here; cache it so the clear is
+                # not re-issued on every tick.
+                device.clearIcon(key)
+                _last_images[key] = None
+                continue
 
-            # Only treat the key as drawn when the call actually succeeded.
-            # clearAllIcon()/page changes already blank the panel; if a draw
-            # fails (set_key_image returns -1 on a transient USB/transport
-            # error) and we cached it anyway, refresh() would skip this key
-            # forever and the page stays blank until an app restart. Caching on
-            # success only makes a transient failure self-heal on the next tick.
-            if result is None or result >= 0:
+            # Only cache a key as drawn when the call actually succeeded.
+            #
+            # The SDK declares transport_set_key_image_stream with
+            # restype=c_uint32, so a C-level failure of -1 surfaces in Python
+            # as 4294967295 -- a POSITIVE number that sails through a
+            # `result >= 0` test. Caching one of those makes refresh() skip
+            # the key forever: the panel freezes on a stale image and the
+            # device only comes back after an app restart. The SDK's own
+            # success value is 0 (TRANSPORT_SUCCESS) and a dead handle
+            # returns None, so only `== 0` counts as drawn.
+            if device.set_key_image(key, image) == 0:
                 _last_images[key] = image
+            else:
+                failed += 1
 
         device.refresh()
+
+    # A tick that drew everything resets the streak; any failure extends it.
+    _write_failures = 0 if failed == 0 else _write_failures + 1
 
 
 # The new SDK decodes raw HID packets into unified InputEvent objects instead of
@@ -233,7 +256,14 @@ if __name__ == "__main__":
                 while True:
                     refresh_thread.join(1)
 
-                    if not refresh_thread.is_alive():
+                    # Either the refresh thread died, or the transport has been
+                    # failing on every tick for a while (see _write_failures).
+                    # Both mean this device object is no longer usable, so drop
+                    # it and let the outer loop re-enumerate and re-open a fresh
+                    # one -- the same path a dead refresh thread already took.
+                    # This is what makes the dock recover on its own instead of
+                    # staying mute until someone restarts the app.
+                    if not refresh_thread.is_alive() or _write_failures >= WRITE_FAILURE_LIMIT:
                         refresh_event.set()
 
                         # The new close() shuts down the internal reader,
@@ -242,6 +272,8 @@ if __name__ == "__main__":
                         device.close()
 
                         refresh_thread.join(2)
+
+                        _write_failures = 0
 
                         break
 
