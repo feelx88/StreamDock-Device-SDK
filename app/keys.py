@@ -50,6 +50,7 @@ class Keys:
                         1: self.mpd.previous(),
                         2: self.mpd.toggle(),
                         3: self.mpd.next(),
+                        4: self.pulse.toggle_default_sink_mute(),
                         5: self.playerctl.toggle(),
                         6: self.loginctl.toggle_lock(),
                     }
