@@ -451,3 +451,142 @@ primitive: a **tiny synthetic pointer nudge** (any input activity re-enables a
 blanked panel on every OS). All calls are non-fatal no-ops if the display is
 already awake; wired only into the unlock path (`locked()` true → unlock →
 wake). Do NOT make this fatal or require a new dependency.
+
+## 2026-10-13 — Process died inside libtransport on USB glitches (`app/main.py`, `app/sdk_patch.py`)
+
+Symptom: the journal showed repeated hard crashes — `code=dumped` with
+`status=11/SEGV` or `status=6/ABRT` and glibc heap errors (`malloc(): unaligned
+tcache chunk`, `free(): too many chunks detected in tcache`,
+`tcache_double_free_verify`) — all with the top frame inside `libtransport.so`
+at `hid_enumerate` / `hid_init`. After each crash the generated autostart unit
+(`Restart=no`) never brought the app back, so the dock stayed dead until the
+next login/reboot.
+
+Root cause — concurrent use of the non-thread-safe vendor transport:
+
+- `LibUSBHIDAPI.enumerate_devices()` → `transport_hid_enumerate()` (hidapi
+  `hid_enumerate`, which runs `hid_init`) has no locking.
+- It was called from **two threads at once**: the main loop's
+  `device_manager.enumerate()` and the SDK hotplug listener thread
+  (`listen()` → `_listen_linux` → `_add_missing_devices` /
+  `_remove_missing_devices` / `_current_device_paths`, which enumerate every
+  1 s poll and on every udev event). Interleaved hidapi calls corrupt the C
+  heap → abort/segfault that no Python retry can survive.
+- Second hazard: the listener and the main loop share `DeviceManager.streamdocks`,
+  so on a USB drop the listener's `_remove_device_by_path` closed the very
+  device object the main loop was still drawing to.
+
+Fixes (all app-side; `Python-SDK/` stays upstream-verbatim):
+
+1. `sdk_patch.patch_enumerate_serialization()` replaces
+   `LibUSBHIDAPI.enumerate_devices` with a wrapper that serializes every call
+   behind one module-level `threading.Lock` (idempotent, applied at startup
+   next to `patch_streamdock293()`). Only a single `hid_enumerate()` is ever in
+   flight.
+2. `main.py` no longer starts `device_manager.listen(...)`: the app polls with
+   its own `enumerate()`, and the loop already detects (re)attach via a failed
+   open/write; the listener added nothing but the concurrent enumeration and
+   the cross-thread close race.
+3. Recovery teardown hardened: on write-failure streak/dead refresh thread,
+   `refresh_event.set()` → `refresh_thread.join(2)` (drops in-flight draws
+   before close) → `_teardown.set()` → `device.close()` under `device_lock`
+   acquired with a 2 s timeout (a refresh wedged in the C transport cannot
+   block recovery) → `REOPEN_SETTLE_DELAY` (1 s) before the outer loop
+   re-enumerates, so an instant reopen no longer repeats "No such device".
+4. `read_callback` checks `_teardown` and takes `device_lock` with a 1 s
+   timeout instead of blocking indefinitely, so a reader parked on the lock
+   cannot outlive `close()`'s reader-join and leak the transport handle.
+
+`_teardown` is cleared at the top of the outer loop, so it stays raised
+through the settle delay and the re-enumerate, and only a fresh session lifts
+it (signal handler also raises it before closing).
+
+Ruled out (don't re-investigate): editing the vendor `.so`; `Python-SDK/` must
+stay verbatim.
+
+## 2026-10-13 (same day) — Reader thread spins the CPU on a half-wedged device
+
+Symptom observed right after the teardown work landed: the app pegged one core
+(22.8 min CPU in 22.3 min wall) and input went dead; a button click was what
+triggered it. Not a hard crash — the process stays up, which made it quieter
+and harder to spot. Only one `hid_write FAILED` line had ever been printed.
+
+Mechanism (confirmed via the service's reader-thread stack):
+
+- The button click wedged the dock's **input** endpoint only; the out pipe
+  (draws/writes) kept working.
+- The SDK reader thread (`device.read_thread`, running `StreamDock._read`)
+  loops on `transport.read_()`, which calls `transport_read` →
+  `hid_read_timeout` → `poll()`. When the endpoint is dead, poll returns
+  immediately (POLLHUP), so the loop spins at ~100% of a core instead of
+  blocking 100 ms per call. `ps` shows the thread in `hid_read_timeout`,
+  still 98% CPU.
+- The old write-failure recovery cannot see this: `_write_failures` counts
+  failed **draws**, and draws keep succeeding on the working out pipe. The
+  panel is static, so after the initial draw no writes are even attempted.
+
+Fix — reader-wedge watchdog in `app/main.py` (no SDK change):
+
+- `_check_reader_wedge(device)` runs at the top of every `refresh()` tick
+  (0.3 s) and samples the reader thread's CPU from
+  `/proc/self/task/<tid>/stat` (on Linux `threading.Thread.ident` is the TID).
+- A healthy reader is parked in poll and burns ~0 CPU. When the reader burns
+  more than `READER_SPIN_FRACTION` (0.666) of the wall time between samples
+  for `READER_SPIN_MIN_TICKS` (2) consecutive ticks, `_reader_wedged` is set
+  and the main loop takes the same teardown + reopen path as a write-failure
+  streak (close under `device_lock`, `REOPEN_SETTLE_DELAY`, re-enumerate). A
+  fresh `open()` rebuilds the HID handle and resets the endpoint.
+- On platforms without `/proc` the watchdog stays a no-op. All watchdog state
+  is re-armed on device change and cleared in the recovery path / outer loop.
+
+Watchdog gotcha (fixed same day, don't re-introduce):
+
+- `threading.Thread.ident` is **not** the OS TID on Python 3.13+ (it is a
+  Python-internal id there); sampling `/proc/self/task/<ident>/stat` failed
+  with ENOENT, so the watchdog silently no-oped and the reader spun unnoticed.
+  Use `thread.native_id` (fall back to `ident` for older interpreters).
+- `/proc/<pid>/task/<tid>/stat` fields after the last `)` are 0-indexed from
+  `state`; utime/stime are **`fields[11]`/`fields[12]`** (fields[10] is
+  `cmajflt`). Verified live: a spinning reader shows ~50 ticks per 0.5 s wall
+  (≈100% of a core) while a parked reader shows ~0.
+
+Ruled out (don't re-investigate): the teardown change did not cause this — the
+reader's C read call predates and is untouched by it; the SDK listen thread
+could not have caught it either (device stays present, no udev event, no
+`[add]/[remove]`). This is the failure mode the write-failure streak simply
+cannot see.
+
+## 2026-10-15 — Icons vanish after a while (`app/main.py`)
+
+Symptom: once the dock is otherwise stable, its panels still go blank after
+some minutes and stay blank until the app is restarted (a click or a page
+change does not bring them back).
+
+Two distinct causes, both from `refresh()` being "only write keys whose image
+changed" (the `_last_images` cache):
+
+1. **Every (re)open blanks the panel with a stale cache.** The open path calls
+   `device.clearAllIcon()` to start from a clean panel, but `_last_images` is a
+   module global that survives a recovery. The first `refresh()` after a
+   reopen then sees every icon as "already drawn" and skips it, so the freshly
+   cleared panel stays dark. This is why the dock could come back from a USB
+   glitch alive but blank.
+2. **The device blanks its own panel.** Firmware inactivity/screensaver (or any
+   panel reset that does not reach us) leaves the cache claiming the icons are
+   still drawn, so nothing is ever re-sent.
+
+Fix (`app/main.py`):
+
+- `FORCE_REPAINT_INTERVAL` (10 s) + `_last_repaint`: `refresh()` drops
+  `_last_images` when the interval elapses, so the next 0.3 s tick redraws every
+  key unconditionally. The interval is well above the panel's own blanking so
+  the extra traffic stays small on a device that resets under load, and blank
+  time is bounded by the interval.
+- On every (re)open, right after `clearAllIcon()`, `_last_images` is cleared and
+  `_last_repaint` is reset to `time.monotonic()`, so the first tick after
+  recovery draws the full panel.
+- Keys with no icon are re-cleared on a forced repaint (the cache miss makes
+  `_UNKNOWN != None`); that is idempotent and harmless.
+
+Tuning: raise `FORCE_REPAINT_INTERVAL` if the periodic full repaint is seen to
+provoke disconnects; it is the only knob.

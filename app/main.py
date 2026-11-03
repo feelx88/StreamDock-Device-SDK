@@ -24,6 +24,7 @@ from StreamDock.DeviceManager import DeviceManager
 from StreamDock.InputTypes import EventType, ButtonKey, KnobId, Direction
 import sdk_patch
 sdk_patch.patch_streamdock293()
+sdk_patch.patch_enumerate_serialization()
 from ydotool_handler import YDoToolHandler
 from pulseaudio_handler import PulseAudioHandler
 from homeassistant_handler import HomeAssistantHandler
@@ -41,8 +42,21 @@ device_lock = Lock()
 
 refresh_event = Event()
 
+# Raised while a device is being torn down. The reader callback drops input
+# instead of waiting on device_lock, so close() can take the lock and tear the
+# transport down without a parked reader blocking its reader-join.
+_teardown = Event()
+
+# Reader-wedge watchdog state. A wedged device spins its SDK reader thread in
+# the C read call instead of blocking in poll; see _check_reader_wedge().
+_reader_wedged = False
+_reader_cpu = None  # (id(device), cpu ticks, monotonic time) of last sample
+_reader_spin_streak = 0
+
 _last_images = {}
 _last_sublayer = None
+# Monotonic time of the last forced full repaint; see FORCE_REPAINT_INTERVAL.
+_last_repaint = 0.0
 
 # Sentinel for "we have no record of what this key is currently showing".
 # It must NOT be None: a key with no icon has a desired state of None, and
@@ -62,6 +76,30 @@ _UNKNOWN = object()
 _write_failures = 0
 WRITE_FAILURE_LIMIT = 10
 
+# How long the recovery path lets the USB stack settle after tearing a device
+# down, before the outer loop enumerates and re-opens it. Re-opening the HID
+# path instantly after a bus reset is what kept "No such device" recurring.
+REOPEN_SETTLE_DELAY = 1.0
+
+# Force a full repaint at least this often, even when no image changed.
+# refresh() only writes keys whose desired image differs from the cache, so
+# anything the device blanks on its own -- its inactivity/screensaver, a USB
+# hiccup that survives recovery, or the clearAllIcon() run on every (re)open --
+# would leave the panel dark until an app restart. Forgetting the cache on this
+# interval makes the next tick redraw every key. It is a handful of writes on a
+# 0.3 s tick, so keep it comfortably above the panel's own blanking to avoid
+# needless USB traffic on a device that already resets under load.
+FORCE_REPAINT_INTERVAL = 10.0
+
+# A healthy reader thread blocks in the transport's poll() and burns ~no CPU.
+# A wedged one (input endpoint dead after a USB failure) makes hid_read_timeout
+# return at once, so the SDK reader loop spins one core forever and input goes
+# dead -- without one draw ever failing, so the write-failure recovery cannot
+# see it. The watchdog flags the device when the reader burns CPU above this
+# fraction of wall time for READER_SPIN_MIN_TICKS consecutive refresh ticks.
+READER_SPIN_FRACTION = 0.666
+READER_SPIN_MIN_TICKS = 2
+
 ydotool = YDoToolHandler(cmd_lock)
 pulse = PulseAudioHandler(config)
 hass = HomeAssistantHandler(config, hass_lock)
@@ -75,8 +113,86 @@ handlers = [ydotool, pulse, hass, mpd, playerctl, loginctl, elite]
 layers = Layers(ydotool, pulse, hass, mpd, playerctl, loginctl, elite)
 
 
+_CLK_TCK = os.sysconf("SC_CLK_TCK")
+
+
+def _reader_cpu_ticks(thread):
+    """CPU clock ticks (user+sys) a thread has burned, or None if unknown.
+
+    On Linux the OS TID is thread.native_id (threading.Thread.ident is a
+    Python-internal id since 3.13, NOT the TID), so /proc/self/task/<tid>/stat
+    reveals the reader thread's CPU without touching the SDK. Fields after the
+    comm field (everything past the last ')' ): [11]=utime, [12]=stime.
+    """
+    os_id = getattr(thread, "native_id", None) or getattr(thread, "ident", None)
+    if not os_id:
+        return None
+    try:
+        with open(f"/proc/self/task/{os_id}/stat", "rb") as f:
+            _, rest = f.read().decode("utf-8", "replace").rsplit(")", 1)
+    except (OSError, ValueError):
+        return None
+    fields = rest.split()
+    try:
+        return int(fields[11]) + int(fields[12])
+    except (IndexError, ValueError):
+        return None
+
+
+def _check_reader_wedge(device):
+    """Flag the device when its reader thread is spinning instead of waiting.
+
+    The transport's read is a C call: when the input endpoint dies, poll()
+    returns immediately and the SDK reader loop burns ~100% of a core. The
+    panel still draws over the (working) out endpoint, so the write-failure
+    streak never grows and nothing else would notice. A healthy reader stays
+    parked in poll and burns ~no CPU. On platforms without /proc this stays a
+    no-op.
+    """
+    global _reader_wedged, _reader_cpu, _reader_spin_streak
+
+    thread = getattr(device, "read_thread", None)
+    if thread is None:
+        _reader_cpu = None
+        _reader_spin_streak = 0
+        return
+
+    ticks = _reader_cpu_ticks(thread)
+    now = time.monotonic()
+    key = id(device)
+
+    if ticks is None:
+        return
+    if _reader_cpu is None or _reader_cpu[0] != key:
+        # First sample for this reader: arm, don't judge.
+        _reader_cpu = (key, ticks, now)
+        _reader_spin_streak = 0
+        return
+
+    _, prev_ticks, prev_time = _reader_cpu
+    _reader_cpu = (key, ticks, now)
+
+    dt = now - prev_time
+    if dt <= 0:
+        return
+    dt_ticks = ticks - prev_ticks
+    if dt_ticks < 0:
+        _reader_spin_streak = 0
+        return
+
+    cpu_s = dt_ticks / _CLK_TCK
+    if cpu_s >= READER_SPIN_FRACTION * dt:
+        _reader_spin_streak += 1
+        if _reader_spin_streak >= READER_SPIN_MIN_TICKS:
+            _reader_wedged = True
+    else:
+        _reader_spin_streak = 0
+
+
 def refresh(device):
-    global _last_images, _last_sublayer, _write_failures
+    global _last_images, _last_sublayer, _write_failures, _last_repaint
+
+    _check_reader_wedge(device)
 
     for handler in handlers:
         handler.update()
@@ -95,6 +211,19 @@ def refresh(device):
         if sublayer != _last_sublayer:
             _last_images.clear()
             _last_sublayer = sublayer
+
+        # Periodically forget what is on screen so every key is redrawn even
+        # when nothing changed. The cache above turns refresh() into "only
+        # write what differs", which is normally what we want, but it also
+        # means anything the device blanks behind our back -- its own
+        # inactivity/screensaver, a USB hiccup that survived recovery, or the
+        # clearAllIcon() run on every (re)open -- would leave the panel dark
+        # forever, because the cache still claims the icons are drawn.
+        # Dropping the cache makes this tick redraw all of them.
+        now = time.monotonic()
+        if now - _last_repaint >= FORCE_REPAINT_INTERVAL:
+            _last_images.clear()
+            _last_repaint = now
 
         failed = 0
         for key in range(1, 7):
@@ -201,12 +330,28 @@ def read_callback(device, event):
 
     Runs on the SDK's internal reader thread (started by device.open()).
     """
+    # While the device is being torn down, drop events instead of waiting for
+    # device_lock: the recovery path holds that lock while it closes the
+    # transport, and a reader parked on the lock could not be joined by
+    # close().
+    if _teardown.is_set():
+        return
+
     key = _event_to_legacy_key(event)
     if key is None:
         return
 
-    with device_lock:
+    # Bounded wait: a refresh() stuck in the C transport must not park the
+    # reader here forever, or it would outlive close()'s reader-join and leak
+    # the transport handle.
+    if not device_lock.acquire(timeout=1.0):
+        return
+    try:
+        if _teardown.is_set():
+            return
         layers.handle_keys(key)
+    finally:
+        device_lock.release()
 
 
 def refresh_callback(device):
@@ -225,6 +370,7 @@ def signal_handler(signum, frame):
     signame = signal.Signals(signum).name
     print(f'Signal handler called with signal {signame} ({signum})')
 
+    _teardown.set()
     for device in device_manager.enumerate():
         device.clearAllIcon()
         device.close()
@@ -241,16 +387,22 @@ def init_signal_handler(device_manger):
 
 
 if __name__ == "__main__":
+    # The SDK's own hotplug listener is intentionally not started. It polls the
+    # HID bus on its own thread in parallel with the enumerate() below and
+    # closes device objects the main loop is still drawing to; that concurrent
+    # use of the vendor transport is what aborted the process inside
+    # libtransport. This loop already detects (re)attach through enumerate()
+    # and a failed open/write, so the listener adds nothing but the race.
     device_manager = DeviceManager()
-    listen_thread = start_thread(
-        # auto_open=False: the app opens/initializes devices itself below
-        lambda: device_manager.listen(auto_open=False, auto_init=False)
-    )
     init_signal_handler(device_manager)
 
     while True:
         try:
             refresh_event.clear()
+            _teardown.clear()
+            _reader_wedged = False
+            _reader_cpu = None
+            _reader_spin_streak = 0
 
             devices = device_manager.enumerate()
 
@@ -265,6 +417,15 @@ if __name__ == "__main__":
                 device.set_brightness(10)
                 device.clearAllIcon()
 
+                # clearAllIcon() just blanked the panel, but the image cache
+                # below is a module global that survives a recovery: without
+                # this, the first refresh() after a (re)open sees every icon as
+                # "already drawn" and skips it, leaving the dock dark until the
+                # app is restarted. Forget what was on screen and start the
+                # forced-repaint clock from now.
+                _last_images.clear()
+                _last_repaint = time.monotonic()
+
                 layers.set_device(device)
                 device.set_key_callback(read_callback)
 
@@ -273,24 +434,57 @@ if __name__ == "__main__":
                 while True:
                     refresh_thread.join(1)
 
-                    # Either the refresh thread died, or the transport has been
-                    # failing on every tick for a while (see _write_failures).
-                    # Both mean this device object is no longer usable, so drop
-                    # it and let the outer loop re-enumerate and re-open a fresh
-                    # one -- the same path a dead refresh thread already took.
+                    # Either the refresh thread died, the transport has been
+                    # failing on every tick for a while (see _write_failures),
+                    # or the reader thread is spinning on a dead input pipe
+                    # (see _check_reader_wedge). All three mean this device
+                    # object is no longer usable, so drop it and let the outer
+                    # loop re-enumerate and re-open a fresh one.
                     # This is what makes the dock recover on its own instead of
                     # staying mute until someone restarts the app.
-                    if not refresh_thread.is_alive() or _write_failures >= WRITE_FAILURE_LIMIT:
+                    if (not refresh_thread.is_alive()
+                            or _write_failures >= WRITE_FAILURE_LIMIT
+                            or _reader_wedged):
+                        if _reader_wedged:
+                            reason = "input reader spinning"
+                        elif not refresh_thread.is_alive():
+                            reason = "refresh thread dead"
+                        else:
+                            reason = "write failures"
+                        print(f"[recover] {reason}: closing {device.path} and re-opening",
+                              flush=True)
+
                         refresh_event.set()
 
-                        # The new close() shuts down the internal reader,
-                        # heartbeat and transport gracefully (no separate
-                        # stop() call exists anymore)
-                        device.close()
-
+                        # Let an in-flight refresh tick finish. refresh()
+                        # touches the transport while holding device_lock, so
+                        # this keeps the close below from racing a draw.
                         refresh_thread.join(2)
 
+                        # Drop further input, then close the device under the
+                        # same lock refresh()/read_callback use so no draw or
+                        # key event touches the transport while it is torn
+                        # down. The lock is taken with a timeout because a
+                        # refresh() wedged in the C transport can hold it past
+                        # the join above; recovery must not block on that.
+                        _teardown.set()
+                        locked = device_lock.acquire(timeout=2)
+                        try:
+                            device.close()
+                        finally:
+                            if locked:
+                                device_lock.release()
+
                         _write_failures = 0
+                        _reader_wedged = False
+                        _reader_cpu = None
+                        _reader_spin_streak = 0
+
+                        # Give the USB stack a moment to finish the
+                        # re-enumeration before the outer loop enumerates and
+                        # re-opens; an instant reopen is what kept "No such
+                        # device" coming back.
+                        time.sleep(REOPEN_SETTLE_DELAY)
 
                         break
 

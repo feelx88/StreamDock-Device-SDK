@@ -7,11 +7,37 @@
 
 import os
 import tempfile
+import threading
 
 from PIL import Image
 
 from StreamDock.InputTypes import ButtonKey
 from StreamDock.ImageHelpers.PILHelper import to_native_key_format
+from StreamDock.Transport.LibUSBHIDAPI import LibUSBHIDAPI
+
+
+# hidapi's hid_enumerate()/hid_init() keep process-global state and are not
+# thread-safe. Every DeviceManager shares one transport, so an enumeration on
+# one thread can run at the same time as an enumeration on another; the
+# interleaved hidapi calls corrupt the C heap and kill the process with a
+# malloc/tcache abort or a segfault inside libtransport. Funnel every
+# enumeration through one lock so only a single hid_enumerate() is ever in
+# flight.
+_enumerate_lock = threading.Lock()
+_original_enumerate_devices = LibUSBHIDAPI.enumerate_devices
+
+
+def _locked_enumerate_devices(vendor_id, product_id):
+    with _enumerate_lock:
+        return _original_enumerate_devices(vendor_id, product_id)
+
+
+def patch_enumerate_serialization():
+    """Make LibUSBHIDAPI.enumerate_devices() process-wide serial.
+
+    Idempotent: the captured original is never wrapped twice.
+    """
+    LibUSBHIDAPI.enumerate_devices = staticmethod(_locked_enumerate_devices)
 
 
 def _patched_set_key_image(self, key, path):
